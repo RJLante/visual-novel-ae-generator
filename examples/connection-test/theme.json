@@ -1,0 +1,19 @@
+{
+  "id": "terminal",
+  "assets": {
+    "background": "assets/background.png",
+    "dialogueFrame": "assets/dialogue-frame.png",
+    "cursor": "assets/cursor.png"
+  },
+  "layout": {
+    "dialogueBox": { "x": 160, "y": 730, "width": 1600, "height": 250 },
+    "dialogueText": { "x": 210, "y": 775, "width": 1500, "height": 160 },
+    "narrationText": { "x": 260, "y": 380, "width": 1400, "height": 300 },
+    "options": { "x": 460, "y": 360, "width": 1000, "itemHeight": 90, "gap": 20 }
+  },
+  "styles": {
+    "dialogue": { "font": "MicrosoftYaHei", "fontSize": 42, "lineHeight": 60, "color": "#E9F6FF" },
+    "narration": { "font": "MicrosoftYaHei", "fontSize": 46, "lineHeight": 68, "color": "#FFFFFF" },
+    "option": { "font": "MicrosoftYaHei", "fontSize": 40, "lineHeight": 56, "color": "#D8ECFF" }
+  }
+}

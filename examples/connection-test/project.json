@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "connection-test",
+  "name": "连接测试",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "theme": "theme.json",
+  "script": "script.json",
+  "timing": {
+    "charactersPerSecond": 12,
+    "lineIntervalSeconds": 0.5,
+    "defaultHoldSeconds": 1.2,
+    "commaPauseSeconds": 0.12,
+    "sentencePauseSeconds": 0.3,
+    "fadeSeconds": 0.45
+  }
+}

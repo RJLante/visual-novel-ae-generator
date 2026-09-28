@@ -1,0 +1,6 @@
+node_modules/
+dist/
+exports/
+*.aep
+.DS_Store
+Thumbs.db

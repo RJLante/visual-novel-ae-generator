@@ -1,0 +1,85 @@
+{
+  "scenes": [
+    {
+      "id": "scene_midnight",
+      "events": [
+        {
+          "id": "n001",
+          "type": "narration",
+          "text": "2月11日，凌晨零时。\n33989直播间还亮着。",
+          "animation": "lines",
+          "holdSeconds": 1.2
+        },
+        {
+          "id": "n002",
+          "type": "narration",
+          "text": "泛式身后悬着一枚黑色椭球体，上面是倒计时。房间里的人看不见它。",
+          "animation": "typewriter",
+          "holdSeconds": 1.2
+        },
+        {
+          "id": "d001",
+          "type": "dialogue",
+          "text": "谢谢大家的SC，看了大家的作品真的很开心……",
+          "animation": "typewriter",
+          "holdSeconds": 1.2
+        },
+        {
+          "id": "n003",
+          "type": "narration",
+          "text": "鳗鳗来扒拉泛式的腿。\n泛式把鳗鳗抱到桌前。",
+          "animation": "lines",
+          "holdSeconds": 1.1
+        },
+        {
+          "id": "n004",
+          "type": "narration",
+          "text": "弹幕飘过：真主播来了。",
+          "animation": "fade",
+          "holdSeconds": 1.0
+        },
+        {
+          "id": "d002",
+          "type": "dialogue",
+          "text": "鳗鳗，来，和大家说再见。\n噫——好臭你这小狗。",
+          "animation": "typewriter",
+          "holdSeconds": 1.2
+        },
+        {
+          "id": "n005",
+          "type": "narration",
+          "text": "泛式扭过头。\n黑色球体上的倒计时，只剩3秒。",
+          "animation": "lines",
+          "holdSeconds": 1.2
+        },
+        {
+          "id": "d003",
+          "type": "dialogue",
+          "text": "诶？这是……",
+          "animation": "typewriter",
+          "holdSeconds": 0.9
+        },
+        {
+          "id": "n006",
+          "type": "narration",
+          "text": "鳗鳗从他身前跃出，爪子按在关播键上。\n倒计时归零。",
+          "animation": "lines",
+          "holdSeconds": 1.2
+        },
+        {
+          "id": "d004",
+          "type": "dialogue",
+          "text": "哇，鳗鳗，别按啊……诶，鳗鳗？",
+          "animation": "typewriter",
+          "holdSeconds": 1.3
+        },
+        {
+          "id": "t001",
+          "type": "transition",
+          "preset": "fadeBlack",
+          "durationSeconds": 0.9
+        }
+      ]
+    }
+  ]
+}

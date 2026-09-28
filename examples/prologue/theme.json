@@ -1,0 +1,20 @@
+{
+  "id": "live-room",
+  "assets": {
+    "background": "assets/background.png",
+    "dialogueFrame": "assets/dialogue-frame.png",
+    "cursor": "assets/cursor.png"
+  },
+  "layout": {
+    "dialogueBox": { "x": 39, "y": 798, "width": 1841, "height": 225 },
+    "dialogueText": { "x": 120, "y": 838, "width": 1680, "height": 150 },
+    "narrationText": { "x": 120, "y": 838, "width": 1680, "height": 150 },
+    "options": { "x": 520, "y": 390, "width": 760, "itemHeight": 78, "gap": 16 }
+  },
+  "styles": {
+    "dialogue": { "font": "LXGWWenKaiGB-Regular", "fontSize": 40, "lineHeight": 58, "color": "#3A2E26" },
+    "narration": { "font": "LXGWWenKaiGB-Regular", "fontSize": 40, "lineHeight": 58, "color": "#3A2E26" },
+    "option": { "font": "LXGWWenKaiGB-Regular", "fontSize": 36, "lineHeight": 52, "color": "#3A2E26" },
+    "optionBackground": { "color": "#F4E7D6", "opacity": 92 }
+  }
+}

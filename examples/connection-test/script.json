@@ -1,0 +1,130 @@
+{
+  "scenes": [
+    {
+      "id": "scene_01",
+      "events": [
+        {
+          "id": "n001",
+          "type": "narration",
+          "text": "夜班的机房里，只剩一台终端还醒着。",
+          "animation": "fade",
+          "holdSeconds": 1.6
+        },
+        {
+          "id": "d001",
+          "type": "dialogue",
+          "text": "连接已建立。\n远端没有立刻回答。",
+          "animation": "typewriter",
+          "holdSeconds": 1.3
+        },
+        {
+          "id": "d002",
+          "type": "dialogue",
+          "text": "光标停在行末，像是在等你确认。",
+          "animation": "typewriter",
+          "holdSeconds": 1.2
+        },
+        {
+          "id": "c001",
+          "type": "choice",
+          "options": [
+            { "id": "continue", "text": "继续连接" },
+            { "id": "disconnect", "text": "断开连接" }
+          ],
+          "initialOptionId": "disconnect",
+          "selectedOptionId": "continue",
+          "waitBeforeMoveSeconds": 0.8,
+          "moveSeconds": 0.25,
+          "holdAfterSelectSeconds": 0.7
+        },
+        {
+          "id": "d003",
+          "type": "dialogue",
+          "text": "密钥已经发出。\n请不要关闭这个窗口。",
+          "animation": "typewriter",
+          "holdSeconds": 1.3
+        },
+        {
+          "id": "n002",
+          "type": "narration",
+          "text": "风扇忽然变慢。\n机柜顶部的灯跳成了琥珀色。\n你听见自己的呼吸。",
+          "animation": "lines",
+          "holdSeconds": 1.6
+        },
+        {
+          "id": "d004",
+          "type": "dialogue",
+          "text": "警告：链路不稳定。\n可以切换备用通道，也可以在这里中止。",
+          "animation": "typewriter",
+          "holdSeconds": 1.4
+        },
+        {
+          "id": "c002",
+          "type": "choice",
+          "options": [
+            { "id": "backup", "text": "切换备用通道" },
+            { "id": "abort", "text": "立即中止" },
+            { "id": "wait", "text": "再等一会儿" }
+          ],
+          "initialOptionId": "wait",
+          "selectedOptionId": "backup",
+          "waitBeforeMoveSeconds": 0.9,
+          "moveSeconds": 0.35,
+          "holdAfterSelectSeconds": 0.8
+        },
+        {
+          "id": "t001",
+          "type": "transition",
+          "preset": "fadeBlack",
+          "durationSeconds": 0.8
+        }
+      ]
+    },
+    {
+      "id": "scene_02",
+      "events": [
+        {
+          "id": "n003",
+          "type": "narration",
+          "text": "备用通道的灯是绿色的，噪声小了很多。",
+          "animation": "fade",
+          "holdSeconds": 1.6
+        },
+        {
+          "id": "d005",
+          "type": "dialogue",
+          "text": "已切换。\n现在能听见我吗？",
+          "animation": "typewriter",
+          "holdSeconds": 1.4
+        },
+        {
+          "id": "d006",
+          "type": "dialogue",
+          "text": "如果你还能改这句对白、选项和光标，第一版就达到目标了。",
+          "animation": "typewriter",
+          "holdSeconds": 1.6
+        },
+        {
+          "id": "n004",
+          "type": "narration",
+          "text": "时间轴不会跟着预览速度重排。\n要改节奏，就改配置，再生成一次。",
+          "animation": "lines",
+          "holdSeconds": 1.6
+        },
+        {
+          "id": "d007",
+          "type": "dialogue",
+          "text": "工程保存在输出目录里。\n素材就在旁边的 assets 文件夹。",
+          "animation": "typewriter",
+          "holdSeconds": 1.5
+        },
+        {
+          "id": "t002",
+          "type": "transition",
+          "preset": "fadeBlack",
+          "durationSeconds": 0.6
+        }
+      ]
+    }
+  ]
+}
