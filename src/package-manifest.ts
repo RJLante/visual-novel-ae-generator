@@ -4,7 +4,7 @@ import type { CompiledProject } from "./types";
 
 export const PACKAGE_VERSION = 1;
 export const SUPPORTED_PACKAGE_VERSIONS = [1] as const;
-export const SUPPORTED_COMPILED_SCHEMA_VERSIONS = [2] as const;
+export const SUPPORTED_COMPILED_SCHEMA_VERSIONS = [2, 3] as const;
 export const PACKAGE_ENTRY_NAME = "vn-package.json";
 
 export interface PackageSummary {

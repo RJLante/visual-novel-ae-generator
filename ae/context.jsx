@@ -34,49 +34,73 @@ VN.describeInstance = function (meta) {
   };
 };
 
+VN.isGeneratedLogical = function (logicalId) {
+  if (!logicalId) return false;
+  if (logicalId === "master" || logicalId === "overlay" || logicalId === "global:control") return true;
+  if (logicalId.indexOf("scene:") === 0 || logicalId.indexOf("event:") === 0 || logicalId.indexOf("style:") === 0) return true;
+  return false;
+};
+
+VN.listHas = function (list, value) {
+  var i;
+  for (i = 0; i < list.length; i++) if (list[i] === value) return true;
+  return false;
+};
+
 VN.resolveContext = function () {
   var active = app.project.activeItem;
   var textLayers = [];
-  var instanceIds = [];
-  var instanceMeta = null;
-  var insertTarget = VN.currentInsertTarget();
-
-  function remember(meta) {
-    var n;
-    for (n = 0; n < instanceIds.length; n++) {
-      if (instanceIds[n] === meta.instanceId) return;
-    }
-    instanceIds.push(meta.instanceId);
-    if (!instanceMeta) instanceMeta = meta;
+  if (!(active instanceof CompItem)) {
+    return { status: "none", instanceId: "", instanceIds: [], textLayers: [], instance: null, message: "" };
   }
-
-  if (active instanceof CompItem && active.selectedLayers.length) {
-    var i;
-    for (i = 0; i < active.selectedLayers.length; i++) {
-      var layer = active.selectedLayers[i];
-      var meta = VN.readMeta(layer.comment);
-      if (!meta || meta.v !== 2 || !meta.instanceId) continue;
-      remember(meta);
-      if (layer.property("ADBE Text Properties") !== null && (meta.preset === "typewriter" || meta.preset === "lines")) {
-        var preview = "";
-        try {
-          preview = layer.property("ADBE Text Properties").property("ADBE Text Document").value.text;
-        } catch (ignoreText) {}
-        textLayers.push({ layer: layer, comp: active, preview: preview, meta: meta });
+  textLayers = VN.supportedSelection(active);
+  var own = VN.readMeta(active.comment);
+  if (own && own.instanceId && VN.isGeneratedLogical(own.logicalId)) {
+    return {
+      status: "unique",
+      instanceId: own.instanceId,
+      instanceIds: [own.instanceId],
+      textLayers: textLayers,
+      instance: VN.describeInstance(own),
+      message: ""
+    };
+  }
+  var ids = [];
+  var i;
+  for (i = 1; i <= active.numLayers; i++) {
+    var layer = active.layer(i);
+    var meta = VN.readMeta(layer.comment);
+    if (meta && meta.instanceId) {
+      if (!VN.listHas(ids, meta.instanceId)) ids.push(meta.instanceId);
+    }
+    try {
+      if (layer.source instanceof CompItem) {
+        var sourceMeta = VN.readMeta(layer.source.comment);
+        if (sourceMeta && sourceMeta.instanceId && !VN.listHas(ids, sourceMeta.instanceId)) ids.push(sourceMeta.instanceId);
       }
-    }
-    if (instanceIds.length > 1) return { state: "ambiguous", instance: null, textLayers: textLayers, insertTarget: insertTarget };
-    if (instanceIds.length === 1) {
-      return { state: "instance", instance: VN.describeInstance(instanceMeta), textLayers: textLayers, insertTarget: insertTarget };
+    } catch (ignoreSource) {}
+  }
+  if (!ids.length) {
+    for (i = 0; i < textLayers.length; i++) {
+      if (!VN.listHas(ids, textLayers[i].meta.instanceId)) ids.push(textLayers[i].meta.instanceId);
     }
   }
-  if (active instanceof CompItem) {
-    var own = VN.readMeta(active.comment);
-    if (own && own.v === 2 && own.instanceId) {
-      return { state: "instance", instance: VN.describeInstance(own), textLayers: textLayers, insertTarget: insertTarget };
-    }
+  if (ids.length > 1) {
+    return {
+      status: "ambiguous",
+      instanceId: "",
+      instanceIds: ids,
+      textLayers: textLayers,
+      instance: null,
+      message: "这里有多份片段。请打开要编辑的生成合成。"
+    };
   }
-  return { state: "empty", instance: null, textLayers: [], insertTarget: insertTarget };
+  if (ids.length === 1) {
+    var folder = VN.instanceFolderMeta(ids[0]);
+    var described = folder ? VN.describeInstance(folder.meta) : { instanceId: ids[0], projectId: "", buildId: "", displayName: ids[0], versionLabel: "" };
+    return { status: "unique", instanceId: ids[0], instanceIds: ids, textLayers: textLayers, instance: described, message: "" };
+  }
+  return { status: "none", instanceId: "", instanceIds: [], textLayers: [], instance: null, message: "" };
 };
 
 VN.findBuildInstances = function (projectId, buildId) {

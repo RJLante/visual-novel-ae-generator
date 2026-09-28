@@ -19,145 +19,73 @@ VN.buildPanel = function (thisObj) {
   }
   win.orientation = "column";
   win.alignChildren = ["fill", "top"];
-  win.spacing = 6;
+  win.spacing = 8;
   win.margins = 10;
+  win.preferredSize = [340, 480];
 
-  var header = win.add("group");
-  header.orientation = "row";
-  header.alignChildren = ["left", "center"];
-  header.add("statictext", undefined, "文字冒险");
-  var moreButton = header.add("button", undefined, "更多");
-  moreButton.alignment = ["right", "center"];
-  moreButton.preferredSize.width = 64;
-
-  var menu = win.add("group");
-  menu.orientation = "column";
-  menu.alignChildren = ["fill", "top"];
-  menu.spacing = 2;
-  var speedMenu = menu.add("button", undefined, "批量调整节奏…");
-  var presetMenu = menu.add("button", undefined, "更换文字动画…");
-  var unlinkMenu = menu.add("button", undefined, "独立编辑样式…");
-  var checkMenu = menu.add("button", undefined, "检查当前片段");
-  var infoMenu = menu.add("button", undefined, "作品包详情");
-  var assetsMenu = menu.add("button", undefined, "打开素材目录");
-
-  var packageHeading = win.add("statictext", undefined, "作品包");
-  var pickRow = win.add("group");
-  pickRow.orientation = "row";
-  pickRow.alignChildren = ["fill", "center"];
-  var chooseButton = pickRow.add("button", undefined, "选择作品包…");
-  chooseButton.alignment = ["fill", "center"];
-  var recent = pickRow.add("dropdownlist", undefined, ["最近使用"]);
-  recent.selection = 0;
-  recent.preferredSize.width = 120;
-
-  var emptyText = win.add("statictext", undefined, "选择一个作品包开始", { multiline: true });
-  emptyText.preferredSize.height = 32;
-
-  var summary = win.add("group");
-  summary.orientation = "column";
-  summary.alignChildren = ["fill", "top"];
-  summary.spacing = 2;
-  var summaryName = summary.add("statictext", undefined, "", { multiline: true });
-  summaryName.preferredSize.height = 32;
-  var summaryMeta = summary.add("statictext", undefined, "", { multiline: true });
+  var clipBox = win.add("panel", undefined, "片段");
+  clipBox.orientation = "column";
+  clipBox.alignChildren = ["fill", "top"];
+  clipBox.margins = 8;
+  var chooseButton = clipBox.add("button", undefined, "选择作品包");
+  var summaryName = clipBox.add("statictext", undefined, "选择一个作品包开始", { multiline: true });
+  summaryName.preferredSize.height = 36;
+  var summaryMeta = clipBox.add("statictext", undefined, " ", { multiline: true });
   summaryMeta.preferredSize.height = 32;
-  var summaryHealth = summary.add("statictext", undefined, "", { multiline: true });
-  summaryHealth.preferredSize.height = 28;
+  var instancePick = clipBox.add("dropdownlist", undefined, ["已有片段"]);
+  var primaryButton = clipBox.add("button", undefined, "导入片段");
+
+  var playBox = win.add("panel", undefined, "文字样式与播放");
+  playBox.orientation = "column";
+  playBox.alignChildren = ["fill", "top"];
+  playBox.margins = 8;
+  var playName = playBox.add("statictext", undefined, " ", { multiline: true });
+  playName.preferredSize.height = 32;
+  var playDuration = playBox.add("statictext", undefined, " ", { multiline: true });
+  playDuration.preferredSize.height = 32;
+  var styleButton = playBox.add("button", undefined, "修改文字样式");
+  var effectList = playBox.add("dropdownlist", undefined, ["打字机", "透明度逐字显示"]);
+  effectList.selection = 0;
+  var effectButton = playBox.add("button", undefined, "应用效果");
+  var effectNote = playBox.add("statictext", undefined, " ", { multiline: true });
+  effectNote.preferredSize.height = 32;
+  var speedLabel = playBox.add("statictext", undefined, "播放速度");
+  var speedSlider = playBox.add("slider", undefined, 1, 0.5, 2);
+  var speedValue = playBox.add("edittext", undefined, "1");
+  var speedPreview = playBox.add("statictext", undefined, " ", { multiline: true });
+  speedPreview.preferredSize.height = 28;
+
+  var textBox = win.add("panel", undefined, "文字动画");
+  textBox.orientation = "column";
+  textBox.alignChildren = ["fill", "top"];
+  textBox.margins = 8;
+  var textCount = textBox.add("statictext", undefined, " ", { multiline: true });
+  var rebuildButton = textBox.add("button", undefined, "更新文字动画");
 
   var errorBox = win.add("group");
   errorBox.orientation = "column";
   errorBox.alignChildren = ["fill", "top"];
-  var errorTitle = errorBox.add("statictext", undefined, "", { multiline: true });
+  var errorTitle = errorBox.add("statictext", undefined, " ", { multiline: true });
   errorTitle.preferredSize.height = 36;
-  var errorHint = errorBox.add("statictext", undefined, "", { multiline: true });
-  errorHint.preferredSize.height = 32;
   var errorRow = errorBox.add("group");
-  errorRow.orientation = "row";
-  var recheckButton = errorRow.add("button", undefined, "重新检查");
-  var copyButton = errorRow.add("button", undefined, "复制错误详情");
+  var copyButton = errorRow.add("button", undefined, "复制错误");
+  var assetsButton = errorRow.add("button", undefined, "打开素材目录");
 
-  var destinationLabel = win.add("statictext", undefined, "导入位置");
-  var destination = win.add("dropdownlist", undefined, ["仅加入项目面板", "插入当前合成"]);
-  destination.selection = 0;
-  var targetText = win.add("statictext", undefined, "导入后可自行拖入时间轴", { multiline: true });
-  targetText.preferredSize.height = 32;
-  var importButton = win.add("button", undefined, "导入片段");
-  var openLastButton = win.add("button", undefined, "打开主合成");
-
-  var duplicateBox = win.add("group");
-  duplicateBox.orientation = "column";
-  duplicateBox.alignChildren = ["fill", "top"];
-  duplicateBox.add("statictext", undefined, "本工程已导入此版本");
-  var duplicateRow = duplicateBox.add("group");
-  duplicateRow.orientation = "row";
-  duplicateRow.alignChildren = ["fill", "center"];
-  var openExistingButton = duplicateRow.add("button", undefined, "打开已导入片段");
-  var copyImportButton = duplicateRow.add("button", undefined, "再导入副本");
-
-  var currentBox = win.add("panel", undefined, "当前片段");
-  currentBox.orientation = "column";
-  currentBox.alignChildren = ["fill", "top"];
-  currentBox.alignment = ["fill", "top"];
-  currentBox.margins = 8;
-  var currentPrompt = currentBox.add("statictext", undefined, "请选择一个生成的片段", { multiline: true });
-  var currentName = currentBox.add("statictext", undefined, "", { multiline: true });
-  currentName.preferredSize.height = 28;
-  var currentRow = currentBox.add("group");
-  currentRow.orientation = "row";
-  currentRow.alignChildren = ["fill", "center"];
-  var openMasterButton = currentRow.add("button", undefined, "打开主合成");
-  var styleButton = currentRow.add("button", undefined, "全局样式");
-
-  var textBox = win.add("panel", undefined, "文字工具");
-  textBox.orientation = "column";
-  textBox.alignChildren = ["fill", "top"];
-  textBox.margins = 8;
-  var textCount = textBox.add("statictext", undefined, "", { multiline: true });
-  var textPreview = textBox.add("statictext", undefined, "", { multiline: true });
-  textPreview.preferredSize.height = 32;
-  var rebuildButton = textBox.add("button", undefined, "按新文案重建动画");
-  textBox.add("statictext", undefined, "手动调整过的动画会跳过");
-
-  var extraBox = win.add("panel", undefined, "批量操作");
-  extraBox.orientation = "column";
-  extraBox.alignChildren = ["fill", "top"];
-  extraBox.margins = 8;
-  var extraTitle = extraBox.add("statictext", undefined, "批量调整节奏");
-  extraBox.add("statictext", undefined, "处理范围");
-  var scopeList = extraBox.add("dropdownlist", undefined, ["选中文字"]);
-  scopeList.selection = 0;
-  var speedLabel = extraBox.add("statictext", undefined, "速度倍率");
-  var speedText = extraBox.add("edittext", undefined, "1");
-  var keepManual = extraBox.add("checkbox", undefined, "按现有关键帧缩放");
-  var presetLabel = extraBox.add("statictext", undefined, "动画预设");
-  var presetList = extraBox.add("dropdownlist", undefined, ["打字机", "逐行出现", "整段淡入"]);
-  presetList.selection = 0;
-  var extraRow = extraBox.add("group");
-  extraRow.orientation = "row";
-  var extraApply = extraRow.add("button", undefined, "应用");
-  var extraClose = extraRow.add("button", undefined, "关闭");
-
+  var statusText = win.add("statictext", undefined, "选择一个作品包开始", { multiline: true });
+  statusText.preferredSize.height = 36;
   var detailsBox = win.add("edittext", undefined, "", { multiline: true });
   detailsBox.preferredSize.height = 72;
 
-  var footer = win.add("group");
-  footer.orientation = "row";
-  footer.alignChildren = ["fill", "center"];
-  var statusText = footer.add("statictext", undefined, "选择一个作品包开始", { multiline: true });
-  statusText.alignment = ["fill", "center"];
-  statusText.preferredSize.height = 28;
-
   var ui = {
-    state: "empty",
     inspection: null,
     manifestFile: null,
     existing: [],
-    lastResult: null,
     context: null,
-    contextSignature: "",
-    extraMode: "",
-    menuOpen: false
+    signature: "",
+    busy: false,
+    fillingSpeed: false,
+    speedLock: null,
+    dragging: false
   };
   VN._panel = win;
 
@@ -168,24 +96,18 @@ VN.buildPanel = function (thisObj) {
   }
 
   function layoutNow() {
-    var i;
     try {
+      var i;
       for (i = 0; i < win.children.length; i++) pinTop(win.children[i]);
       win.layout.layout(true);
     } catch (ignoreLayout) {}
-    try {
-      win.update();
-    } catch (ignoreUpdate) {}
   }
 
   function setShown(item, shown) {
     item.visible = !!shown;
     try {
-      if (shown) {
-        item.maximumSize = [4000, 4000];
-        if (item._vnHeight) item.preferredSize = [item.preferredSize.width > 20 ? item.preferredSize.width : 240, item._vnHeight];
-      } else {
-        if (!item._vnHeight && item.preferredSize && item.preferredSize.height > 8) item._vnHeight = item.preferredSize.height;
+      if (shown) item.maximumSize = [4000, 4000];
+      else {
         item.minimumSize = [0, 0];
         item.maximumSize = [0, 0];
       }
@@ -193,245 +115,146 @@ VN.buildPanel = function (thisObj) {
   }
 
   function setLabel(field, text) {
-    var value = text ? String(text) : " ";
-    field.text = value;
-    try {
-      field.characters = value.length < 12 ? 12 : value.length;
-    } catch (ignoreCharacters) {}
+    field.text = text ? String(text) : " ";
   }
 
-  function setStatus(text) {
+  function setStatus(text, details) {
     setLabel(statusText, text);
-    try {
-      win.update();
-    } catch (ignoreUpdate) {}
+    detailsBox.text = details || "";
+    setShown(detailsBox, !!details);
+    layoutNow();
   }
 
-  function showDetails(text, shown) {
-    detailsBox.text = text || "";
-    setShown(detailsBox, !!shown && !!text);
+  function speedNumber(value) {
+    var number = Math.round(Number(value) * 100) / 100;
+    if (!(number >= 0.5 && number <= 2)) return null;
+    return number;
   }
 
-  function shortText(value) {
-    var text = String(value || "").replace(/\r|\n/g, " ");
-    if (text.length > 28) text = text.substring(0, 28) + "…";
-    return text ? "“" + text + "”" : "";
+  function predictedText(instanceId, speed) {
+    var folder = VN.instanceFolderMeta(instanceId);
+    if (!folder || !folder.meta.baseline) return "";
+    var frames = Math.round(folder.meta.baseline.masterDurationFrames / speed);
+    return "预计：" + VN.formatDuration(frames, folder.meta.baseline.fps);
   }
 
-  function fillRecent() {
-    VN._fillingRecent = true;
-    recent.removeAll();
-    recent.add("item", "最近使用");
-    ui.recentItems = VN.readRecentPackages();
+  function currentText(instanceId) {
+    var caps = VN.capabilitiesFor(instanceId);
+    var master = VN.masterCompFor(instanceId);
+    if (!master) return "当前片段";
+    var frames = Math.round(master.duration / master.frameDuration);
+    return "当前片段：" + VN.formatDuration(frames, master.frameRate) + " · " + caps.speedValue + " 倍速";
+  }
+
+  function fillInstances() {
+    instancePick.removeAll();
     var i;
-    for (i = 0; i < ui.recentItems.length; i++) {
-      var item = ui.recentItems[i];
-      var label = item.displayName || "作品包";
-      if (item.versionLabel) label += " " + item.versionLabel;
-      var file = new File(item.manifestPath);
-      if (!file.exists) label += "（找不到）";
-      recent.add("item", label);
+    for (i = 0; i < ui.existing.length; i++) {
+      var meta = ui.existing[i].meta || {};
+      instancePick.add("item", meta.displayName || ui.existing[i].instanceId);
     }
-    recent.selection = 0;
-    VN._fillingRecent = false;
+    if (instancePick.items.length) instancePick.selection = 0;
   }
 
   function renderChrome() {
-    var state = ui.state;
-    var busy = state === "checking" || state === "importing";
+    var busy = ui.busy;
     var ready = ui.inspection && ui.inspection.ok;
+    var count = ui.existing.length;
     chooseButton.enabled = !busy;
-    recent.enabled = !busy;
-    destination.enabled = ready && !busy;
-    importButton.enabled = (state === "ready" || state === "success") && !busy;
-    moreButton.enabled = !busy;
-    setShown(emptyText, state === "empty");
-    setShown(summary, !!ready);
-    setShown(errorBox, state === "invalid" || state === "failed");
-    setShown(destinationLabel, !!ready && state !== "importing");
-    setShown(destination, !!ready && state !== "importing");
-    setShown(targetText, !!ready && state !== "importing");
-    setShown(importButton, state !== "duplicate");
-    setShown(openLastButton, state === "success" && ui.lastResult && ui.lastResult.master);
-    setShown(duplicateBox, state === "duplicate");
-    setShown(menu, ui.menuOpen && !busy);
-    setShown(extraBox, !!ui.extraMode && !busy);
-    if (!busy && state !== "failed" && state !== "invalid") {
-      if (!detailsBox.text || ui.extraMode) setShown(detailsBox, !!ui.extraMode && !!detailsBox.text);
-    }
+    primaryButton.enabled = !busy && ((ready && count === 0) || count > 0);
+    primaryButton.text = count ? "打开片段" : "导入片段";
+    setShown(instancePick, count > 1);
+    setShown(summaryName, true);
+    setShown(summaryMeta, !!ready);
+    setShown(errorBox, ui.inspection && !ui.inspection.ok);
+    var context = ui.context;
+    var unique = context && context.status === "unique";
+    setShown(playBox, !!unique && !busy);
+    setShown(textBox, !!(context && context.textLayers && context.textLayers.length) && !busy);
+    if (!unique && context && context.status === "ambiguous") setLabel(statusText, context.message);
     layoutNow();
   }
 
   function applyInspection(inspection, manifestFile) {
     ui.inspection = inspection;
     ui.manifestFile = manifestFile || ui.manifestFile;
-    ui.contextSignature = "";
+    ui.signature = "";
     if (!inspection || !inspection.ok) {
-      ui.state = inspection ? "invalid" : "empty";
+      setLabel(summaryName, inspection ? inspection.message : "选择一个作品包开始");
+      setLabel(summaryMeta, " ");
       setLabel(errorTitle, inspection ? inspection.message : " ");
-      setLabel(errorHint, inspection ? inspection.hint : " ");
-      showDetails(inspection ? inspection.message + "\n" + inspection.hint + "\n" + inspection.details : "", !!inspection);
-      setStatus(inspection ? inspection.message : "选择一个作品包开始");
+      ui.existing = [];
+      setStatus(inspection ? inspection.message : "选择一个作品包开始", inspection ? inspection.details : "");
+      setShown(assetsButton, !!(inspection && inspection.message && inspection.message.indexOf("找不到") !== -1));
       renderChrome();
       return;
     }
     var manifest = inspection.manifest;
     var summaryInfo = manifest.summary;
-    setLabel(summaryName, manifest.displayName + "  " + (manifest.versionLabel || ""));
-    setLabel(summaryMeta, summaryInfo.sceneCount + " 个场景 · " + summaryInfo.textEventCount + " 段文字 · " + VN.formatDuration(summaryInfo.durationFrames, summaryInfo.fps));
-    setLabel(summaryHealth, "素材齐全，可以导入  ·  " + summaryInfo.width + " × " + summaryInfo.height + "  ·  " + summaryInfo.fps + " fps");
+    setLabel(summaryName, manifest.displayName || "作品");
+    setLabel(summaryMeta, summaryInfo.textEventCount + " 段文字 · " + VN.formatDuration(summaryInfo.durationFrames, summaryInfo.fps));
     ui.existing = VN.findBuildInstances(manifest.projectId, manifest.buildId);
-    if (ui.existing.length) {
-      ui.state = "duplicate";
-      setStatus("此版本已存在");
-      showDetails("", false);
-    } else {
-      ui.state = "ready";
-      setStatus("可以导入");
-      showDetails("", false);
-    }
+    fillInstances();
+    setStatus(ui.existing.length ? "此版本已在工程中" : "可以导入", "");
     renderChrome();
     syncContext();
   }
 
-  function loadManifest(file, repairedFrom, previousUsed) {
+  function loadManifest(file) {
     if (!file) return;
     try {
-      ui.state = "checking";
-      setStatus("正在检查素材与版本…");
+      ui.busy = true;
+      setStatus("正在检查素材与版本…", "");
       renderChrome();
       var inspection = VN.inspectPackage(file);
-      if (repairedFrom && inspection.ok) {
-        VN.replaceRecentPath(repairedFrom, {
-          displayName: inspection.manifest.displayName,
-          manifestPath: file.fsName,
-          lastUsedAt: previousUsed || "",
-          versionLabel: inspection.manifest.versionLabel
-        });
-        fillRecent();
-      }
+      ui.busy = false;
       applyInspection(inspection, file);
     } catch (err) {
-      ui.state = "failed";
-      setLabel(errorTitle, "无法读取作品包");
-      setLabel(errorHint, String(err));
-      showDetails(String(err), true);
-      setStatus(String(err));
-      renderChrome();
+      ui.busy = false;
+      ui.inspection = { ok: false, message: "无法读取作品包", details: String(err) };
+      applyInspection(ui.inspection, file);
     }
   }
 
-  function choosePackage() {
-    if (VN._importing) return;
-    var picked = File.openDialog("选择 vn-package.json", "JSON:*.json");
-    if (!picked) return;
-    loadManifest(picked, "");
+  function selectedExisting() {
+    if (!ui.existing.length) return null;
+    if (ui.existing.length === 1) return ui.existing[0];
+    var index = instancePick.selection ? instancePick.selection.index : 0;
+    return ui.existing[index] || ui.existing[0];
   }
 
-  function syncContext() {
-    if (VN._importing) return;
-    var context = VN.resolveContext();
-    ui.context = context;
-    var targetLabel = "导入后可自行拖入时间轴";
-    if (destination.selection && destination.selection.index === 1) {
-      targetLabel = context.insertTarget ? "插入到：" + context.insertTarget.name + " · " + context.insertTarget.timecode : "请先打开要插入的合成";
-    }
-    setLabel(targetText, targetLabel);
-    var identified = context.state === "instance" && context.instance;
-    setShown(currentPrompt, !identified);
-    setShown(currentName, !!identified);
-    setShown(currentRow, !!identified);
-    if (identified) setLabel(currentName, context.instance.displayName + (context.instance.versionLabel ? "  " + context.instance.versionLabel : ""));
-    var textCountValue = context.textLayers.length;
-    setShown(textBox, textCountValue > 0);
-    if (textCountValue > 0) {
-      setLabel(textCount, "已选择 " + textCountValue + " 个可处理的文字层");
-      setLabel(textPreview, shortText(context.textLayers[0].preview));
-    }
-    var instanceKey = identified ? context.instance.instanceId : context.state;
-    var signature = instanceKey + "|" + textCountValue + "|" + targetLabel;
-    if (signature === ui.contextSignature) return;
-    ui.contextSignature = signature;
-    layoutNow();
+  function openExisting() {
+    var chosen = selectedExisting();
+    if (!chosen) return;
+    var opened = VN.openLogicalComp(chosen.instanceId, "master");
+    setStatus(opened.ok ? "已打开片段" : opened.message, "");
+    ui.signature = "";
+    syncContext();
   }
 
-  function showFailure(result) {
-    ui.state = "failed";
-    setLabel(errorTitle, result.message);
-    setLabel(errorHint, result.hint || " ");
-    showDetails([result.message, result.hint, result.cleanup, result.details].join("\n"), true);
-    setStatus(result.message);
-    renderChrome();
-  }
-
-  function beginImport(asCopy) {
-    if (VN._importing || !ui.manifestFile) return;
+  function beginImport() {
+    if (ui.busy || !ui.manifestFile) return;
     var inspection = VN.inspectPackage(ui.manifestFile);
     if (!inspection.ok) {
       applyInspection(inspection, ui.manifestFile);
       return;
     }
-    ui.inspection = inspection;
+    ui.existing = VN.findBuildInstances(inspection.manifest.projectId, inspection.manifest.buildId);
+    if (ui.existing.length) {
+      fillInstances();
+      renderChrome();
+      openExisting();
+      return;
+    }
     try {
       VN.ensureVersion();
       if (app.project.numItems > 0) VN.ensureExpressionEngineCompatible();
     } catch (err) {
-      showFailure({
-        message: VN.friendlyImportError(err),
-        hint: "工程未被修改。",
-        cleanup: "工程未被修改。",
-        details: String(err)
-      });
+      setStatus(VN.friendlyImportError(err), String(err));
       return;
     }
-    if (!asCopy) {
-      var existing = VN.findBuildInstances(inspection.manifest.projectId, inspection.manifest.buildId);
-      if (existing.length) {
-        ui.existing = existing;
-        ui.state = "duplicate";
-        setStatus("此版本已存在");
-        renderChrome();
-        return;
-      }
-    }
-    var destinationName = destination.selection && destination.selection.index === 1 ? "comp" : "project";
-    var targetComp = null;
-    var insertTime = null;
-    var extendHost = false;
-    if (destinationName === "comp") {
-      var target = VN.currentInsertTarget();
-      if (!target) {
-        setStatus("请先打开要插入的合成。");
-        return;
-      }
-      var seconds = inspection.compiled.durationFrames / inspection.compiled.fps;
-      if (target.time + seconds > target.comp.duration + 0.0005) {
-        var agreed = confirm("片段会超出「" + target.comp.name + "」的结尾。\n是否延长这个合成后再导入？\n\n选择「否」将取消，不会修改工程。");
-        if (!agreed) {
-          setStatus("已取消导入，工程没有修改。");
-          return;
-        }
-        extendHost = true;
-      }
-      var again = VN.currentInsertTarget();
-      if (!again || again.comp !== target.comp) {
-        setStatus("当前合成已变化，导入已取消，工程没有修改。");
-        return;
-      }
-      if (again.time + seconds <= again.comp.duration + 0.0005) extendHost = false;
-      targetComp = again.comp;
-      insertTime = again.time;
-    }
-
-    VN._importing = true;
-    ui.state = "importing";
-    ui.menuOpen = false;
-    ui.extraMode = "";
-    setStatus("正在检查作品包…");
+    ui.busy = true;
     renderChrome();
-    VN.onImportPhase = function (phase) {
-      setStatus(phase === "assets" ? "正在导入素材…" : phase === "comps" || phase === "layers" ? "正在创建合成和图层…" : phase === "verify" ? "正在检查结果…" : "正在检查作品包…");
-    };
     var result;
     try {
       result = VN.runImport({
@@ -439,216 +262,221 @@ VN.buildPanel = function (thisObj) {
         packageRoot: inspection.packageRoot,
         displayName: inspection.manifest.displayName,
         versionLabel: inspection.manifest.versionLabel,
-        destination: destinationName,
+        destination: "project",
         saveProject: false,
-        extendHost: extendHost,
-        targetComp: targetComp,
-        insertTime: insertTime,
+        extendHost: false,
+        targetComp: null,
+        insertTime: null,
         activeItem: null,
         reportFile: new File(inspection.packageRoot.fsName + "/report.ae.json")
       });
     } finally {
-      VN.onImportPhase = null;
-      VN._importing = false;
+      ui.busy = false;
     }
-    ui.lastResult = result;
     if (result.ok) {
-      VN.rememberSuccessfulImport({
-        displayName: inspection.manifest.displayName,
-        manifestPath: ui.manifestFile.fsName,
-        lastUsedAt: VN.timestampNow(),
-        versionLabel: inspection.manifest.versionLabel
-      });
-      fillRecent();
-      ui.state = "success";
-      setLabel(summaryHealth, "此版本已导入当前工程");
-      setStatus(result.message);
-      showDetails(result.hint ? result.message + "\n" + result.hint + "\n" + result.details : "", !!result.hint);
+      try {
+        VN.rememberSuccessfulImport({
+          displayName: inspection.manifest.displayName,
+          manifestPath: ui.manifestFile.fsName,
+          lastUsedAt: VN.timestampNow(),
+          versionLabel: inspection.manifest.versionLabel
+        });
+      } catch (ignoreRemember) {}
+      if (result.master) {
+        try {
+          result.master.openInViewer();
+        } catch (ignoreOpen) {}
+      }
+      ui.existing = VN.findBuildInstances(inspection.manifest.projectId, inspection.manifest.buildId);
+      fillInstances();
+      setStatus(result.message || "已导入并打开片段", result.hint || "");
       renderChrome();
+      ui.signature = "";
       syncContext();
       return;
     }
-    showFailure(result);
-  }
-
-  function openExtra(mode) {
-    ui.menuOpen = false;
-    ui.extraMode = mode;
-    extraTitle.text = mode === "preset" ? "更换文字动画" : mode === "unlink" ? "独立编辑样式" : "批量调整节奏";
-    var context = VN.resolveContext();
-    ui.context = context;
-    scopeList.removeAll();
-    scopeList.add("item", "选中文字 · " + context.textLayers.length + " 层");
-    scopeList.add("item", "当前合成");
-    scopeList.add("item", "当前片段");
-    scopeList.selection = 0;
-    speedText.text = "1";
-    keepManual.value = false;
-    presetList.selection = 0;
-    setShown(speedLabel, mode === "speed");
-    setShown(speedText, mode === "speed");
-    setShown(keepManual, mode === "speed");
-    setShown(presetLabel, mode === "preset");
-    setShown(presetList, mode === "preset");
+    setStatus(result.message, [result.hint, result.cleanup, result.details].join("\n"));
     renderChrome();
   }
 
-  function selectedScope() {
-    if (!scopeList.selection || scopeList.selection.index === 0) return "selection";
-    if (scopeList.selection.index === 1) return "scene";
-    return "instance";
+  function syncSpeed(instanceId) {
+    var caps = VN.capabilitiesFor(instanceId);
+    ui.fillingSpeed = true;
+    speedSlider.value = caps.speedValue;
+    speedValue.text = String(caps.speedValue);
+    effectList.selection = caps.defaultEffect === "characterFade" ? 1 : 0;
+    ui.fillingSpeed = false;
+    setLabel(playDuration, currentText(instanceId));
+    setLabel(speedPreview, " ");
+    setLabel(effectNote, "默认效果：" + VN.effectLabel(caps.defaultEffect));
+    var enabled = !!caps.full;
+    effectList.enabled = enabled;
+    effectButton.enabled = enabled;
+    speedSlider.enabled = enabled;
+    speedValue.enabled = enabled;
+    styleButton.text = caps.style === "editor" ? "修改文字样式" : "打开原有样式控制";
   }
 
-  chooseButton.onClick = choosePackage;
-  recent.onChange = function () {
-    if (VN._fillingRecent || !recent.selection || recent.selection.index < 1) return;
-    var item = ui.recentItems[recent.selection.index - 1];
-    if (!item) return;
-    var file = new File(item.manifestPath);
-    if (!file.exists) {
-      setStatus("找不到这个作品包，请重新定位 vn-package.json。");
-      var picked = File.openDialog("重新定位 vn-package.json", "JSON:*.json");
-      if (!picked) return;
-      loadManifest(picked, item.manifestPath, item.lastUsedAt);
-      return;
-    }
-    loadManifest(file, "");
-  };
-  destination.onChange = function () {
-    ui.contextSignature = "";
-    syncContext();
-  };
-  importButton.onClick = function () {
-    beginImport(false);
-  };
-  copyImportButton.onClick = function () {
-    beginImport(true);
-  };
-  openExistingButton.onClick = function () {
-    if (!ui.existing.length) return;
-    var opened = VN.openLogicalComp(ui.existing[0].instanceId, "master");
-    setStatus(opened.ok ? "已打开已导入片段" : opened.message);
-  };
-  openLastButton.onClick = function () {
-    if (!ui.lastResult || !ui.lastResult.master) return;
-    ui.lastResult.master.openInViewer();
-    setStatus("已打开主合成");
-    ui.contextSignature = "";
-    syncContext();
-  };
-  openMasterButton.onClick = function () {
+  function syncContext() {
+    if (ui.busy || ui.dragging) return;
     var context = VN.resolveContext();
-    if (!context.instance) {
-      setStatus("请选择一个生成的片段");
+    ui.context = context;
+    var textCountValue = context.textLayers ? context.textLayers.length : 0;
+    var instanceKey = context.status === "unique" ? context.instanceId : context.status;
+    var signature = instanceKey + "|" + textCountValue + "|" + (ui.existing.length) + "|" + (context.message || "");
+    var changed = signature !== ui.signature;
+    if (context.status === "unique") {
+      var folder = VN.instanceFolderMeta(context.instanceId);
+      var name = context.instance && context.instance.displayName ? context.instance.displayName : context.instanceId;
+      if (folder && folder.meta.displayName) name = folder.meta.displayName;
+      setLabel(playName, name);
+      if (changed) syncSpeed(context.instanceId);
+      else setLabel(playDuration, currentText(context.instanceId));
+    }
+    if (textCountValue) setLabel(textCount, "已选中 " + textCountValue + " 段文字");
+    if (!changed) return;
+    ui.signature = signature;
+    renderChrome();
+  }
+
+  function selectionInstance() {
+    var context = VN.resolveContext();
+    ui.context = context;
+    if (!context.textLayers || !context.textLayers.length) return "";
+    var id = context.textLayers[0].meta.instanceId;
+    var i;
+    for (i = 1; i < context.textLayers.length; i++) {
+      if (context.textLayers[i].meta.instanceId !== id) return "";
+    }
+    return id;
+  }
+
+  function commitSpeed(raw) {
+    var context = ui.context;
+    if (!context || context.status !== "unique") return;
+    var speed = speedNumber(raw);
+    if (speed === null) {
+      setStatus("速度需要在 0.5 到 2 之间。", "");
+      syncSpeed(context.instanceId);
       return;
     }
-    var opened = VN.openLogicalComp(context.instance.instanceId, "master");
-    setStatus(opened.ok ? "已打开主合成" : opened.message);
+    var caps = VN.capabilitiesFor(context.instanceId);
+    if (Math.abs(speed - caps.speedValue) < 0.001) {
+      setLabel(speedPreview, " ");
+      return;
+    }
+    var lock = ui.speedLock || VN.captureLock(context.instanceId);
+    ui.busy = true;
+    speedSlider.enabled = false;
+    speedValue.enabled = false;
+    effectButton.enabled = false;
+    var result = VN.executeSpeed(lock, speed);
+    ui.busy = false;
+    ui.speedLock = null;
+    ui.dragging = false;
+    syncSpeed(context.instanceId);
+    setStatus(result.message, result.status === "failed" ? result.message : "");
+    renderChrome();
+  }
+
+  chooseButton.onClick = function () {
+    if (ui.busy) return;
+    var picked = File.openDialog("选择 vn-package.json", "JSON:*.json");
+    if (!picked) return;
+    loadManifest(picked);
+  };
+  primaryButton.onClick = function () {
+    if (ui.existing.length) openExisting();
+    else beginImport();
   };
   styleButton.onClick = function () {
     var context = VN.resolveContext();
-    if (context.state === "ambiguous" || !context.instance) {
-      setStatus("请选择一个生成的片段");
+    if (!context || context.status !== "unique") {
+      setStatus("请先打开一个生成片段。", "");
       return;
     }
-    var opened = VN.openLogicalComp(context.instance.instanceId, "global:control");
-    setStatus(opened.ok ? "已打开全局样式" : opened.message);
+    var result = VN.openStyleEditor(context.instanceId);
+    setStatus(result.message, "");
+  };
+  effectButton.onClick = function () {
+    var context = VN.resolveContext();
+    if (!context || context.status !== "unique") {
+      setStatus("请先打开一个生成片段。", "");
+      return;
+    }
+    var effect = effectList.selection && effectList.selection.index === 1 ? "characterFade" : "typewriter";
+    var lock = VN.captureLock(context.instanceId);
+    ui.busy = true;
+    renderChrome();
+    var result = VN.executeEffect(lock, effect);
+    ui.busy = false;
+    var retained = 0;
+    var i;
+    for (i = 0; i < result.items.length; i++) if (result.items[i].status !== "updated") retained += 1;
+    if (result.status === "updated" || result.status === "partial") {
+      setLabel(effectNote, "默认效果：" + VN.effectLabel(effect) + (retained ? "\n" + retained + " 段保留原效果" : ""));
+    }
+    setStatus(result.message, result.status === "failed" || result.status === "partial" ? result.message : "");
+    ui.signature = "";
+    syncContext();
+  };
+  speedSlider.onChanging = function () {
+    if (ui.fillingSpeed) return;
+    var context = ui.context;
+    if (!context || context.status !== "unique") return;
+    if (!ui.speedLock) ui.speedLock = VN.captureLock(context.instanceId);
+    ui.dragging = true;
+    var speed = speedNumber(speedSlider.value) || speedSlider.value;
+    speedValue.text = String(Math.round(speedSlider.value * 100) / 100);
+    setLabel(speedPreview, predictedText(context.instanceId, speedSlider.value));
+  };
+  speedSlider.onChange = function () {
+    if (ui.fillingSpeed) return;
+    ui.dragging = false;
+    commitSpeed(speedSlider.value);
+  };
+  speedValue.onChange = function () {
+    if (ui.fillingSpeed) return;
+    ui.speedLock = ui.context && ui.context.status === "unique" ? VN.captureLock(ui.context.instanceId) : null;
+    commitSpeed(speedValue.text);
   };
   rebuildButton.onClick = function () {
-    var result = VN.rebuildSelectedText();
-    setStatus(result.message);
-    showDetails(result.details, !!result.details);
+    var instanceId = selectionInstance();
+    if (!instanceId) {
+      setStatus("请选中同一个片段里的文字。", "");
+      return;
+    }
+    var lock = VN.captureLock(instanceId);
+    ui.busy = true;
     renderChrome();
-  };
-  recheckButton.onClick = function () {
-    if (ui.manifestFile) loadManifest(ui.manifestFile, "");
+    var result = VN.executeRebuild(lock);
+    ui.busy = false;
+    var details = "";
+    var i;
+    for (i = 0; i < result.items.length; i++) {
+      if (result.items[i].status !== "updated" && result.items[i].message) details += result.items[i].message + "\n";
+    }
+    setStatus(result.message, details);
+    renderChrome();
   };
   copyButton.onClick = function () {
-    var payload = [errorTitle.text, errorHint.text, detailsBox.text].join("\n");
-    setStatus(VN.copyText(payload) ? "已复制错误详情" : "请在详情框中全选复制");
+    var payload = errorTitle.text + "\n" + detailsBox.text;
+    setStatus(VN.copyText(payload) ? "已复制错误详情" : "请在详情框中全选复制", detailsBox.text);
   };
-  moreButton.onClick = function () {
-    ui.menuOpen = !ui.menuOpen;
-    renderChrome();
-  };
-  speedMenu.onClick = function () {
-    openExtra("speed");
-  };
-  presetMenu.onClick = function () {
-    openExtra("preset");
-  };
-  unlinkMenu.onClick = function () {
-    openExtra("unlink");
-  };
-  checkMenu.onClick = function () {
-    ui.menuOpen = false;
-    var context = VN.resolveContext();
-    if (!context.instance) {
-      setStatus("请选择一个生成的片段");
-      renderChrome();
-      return;
-    }
-    var result = VN.applyToTargets("instance", "VN Check", function (layer, comp) {
-      return VN.checkLayer(layer, comp);
-    });
-    setStatus(result.ok ? "已检查当前片段" : result.message);
-    showDetails(result.notes ? result.notes.join("\n") : "", result.ok);
-    renderChrome();
-  };
-  infoMenu.onClick = function () {
-    ui.menuOpen = false;
-    if (!ui.inspection || !ui.inspection.ok) {
-      setStatus("请先选择作品包");
-      renderChrome();
-      return;
-    }
-    showDetails(ui.inspection.details, true);
-    renderChrome();
-  };
-  assetsMenu.onClick = function () {
-    ui.menuOpen = false;
-    renderChrome();
+  assetsButton.onClick = function () {
     if (!ui.inspection || !ui.inspection.packageRoot) {
-      setStatus("请先选择作品包");
+      setStatus("请先选择作品包", "");
       return;
     }
     var folder = new Folder(ui.inspection.packageRoot.fsName + "/assets");
     if (!folder.exists) folder = ui.inspection.packageRoot;
     folder.execute();
   };
-  extraClose.onClick = function () {
-    ui.extraMode = "";
-    renderChrome();
-  };
-  extraApply.onClick = function () {
-    var scopeName = selectedScope();
-    var result;
-    if (ui.extraMode === "speed") {
-      var speed = parseFloat(speedText.text);
-      if (!(speed > 0)) {
-        setStatus("速度倍率必须大于 0。");
-        return;
-      }
-      var manual = keepManual.value;
-      result = VN.applyToTargets(scopeName, "VN Apply Speed", function (layer, comp) {
-        return VN.applySpeedToLayer(layer, comp, speed, manual);
-      });
-    } else if (ui.extraMode === "preset") {
-      var preset = presetList.selection && presetList.selection.index === 1 ? "lines" : presetList.selection && presetList.selection.index === 2 ? "fade" : "typewriter";
-      result = VN.applyToTargets(scopeName, "VN Apply Preset", function (layer, comp) {
-        return VN.applyPresetToLayer(layer, comp, preset);
-      });
-    } else {
-      result = VN.applyToTargets(scopeName, "VN Unlink Style", function (layer, comp) {
-        return VN.unlinkStyle(layer, comp);
-      });
-    }
-    ui.extraMode = "";
-    setStatus(result.ok ? "已处理 " + result.notes.length + " 个文字层" : result.message);
-    showDetails(result.notes ? result.notes.join("\n") : "", !!(result.notes && result.notes.length));
-    renderChrome();
-  };
 
+  try {
+    win.onResize = function () { layoutNow(); };
+    win.onResizing = function () { layoutNow(); };
+  } catch (ignoreResize) {}
   try {
     win.onClose = function () {
       VN._panel = null;
@@ -657,16 +485,13 @@ VN.buildPanel = function (thisObj) {
   } catch (ignoreClose) {}
 
   VN.syncPanelContext = syncContext;
-  layoutNow();
-  fillRecent();
-  setShown(menu, false);
-  setShown(extraBox, false);
-  setShown(detailsBox, false);
+  setShown(playBox, false);
   setShown(textBox, false);
+  setShown(errorBox, false);
+  setShown(detailsBox, false);
+  setShown(instancePick, false);
+  layoutNow();
   applyInspection(null, null);
-  ui.state = "empty";
-  setStatus("选择一个作品包开始");
-  renderChrome();
   syncContext();
   VN.ensurePolling();
   if (!hosted) {

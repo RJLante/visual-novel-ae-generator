@@ -56,7 +56,7 @@ test("build 输出 JSX、编排、配置快照和检查报告", () => {
   assert.equal(manifest.buildId, compiled.buildId);
   assert.equal(manifest.summary.durationFrames, compiled.durationFrames);
   assert.equal(manifest.summary.textEventCount, 1);
-  assert.equal(compiled.schemaVersion, 2);
+  assert.equal(compiled.schemaVersion, 3);
   assert.equal(compiled.assets[0].relativePath, "assets/background.png");
   assert.match(compiled.assets[0].absolutePath, /assets\/background\.png$/);
   assert.equal(fs.existsSync(path.join(outputDir, "source", "script.json")), true);

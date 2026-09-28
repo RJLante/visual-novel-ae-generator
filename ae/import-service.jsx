@@ -128,7 +128,7 @@ VN.runImport = function (options) {
     VN.ensureVersion();
     if (typeof JSON === "undefined") throw new Error("这个 After Effects 的脚本环境无法解析 JSON。");
     var compiled = options.compiled;
-    if (!compiled || compiled.schemaVersion !== 2) throw new Error("这份作品包的数据结构不是受支持的版本。");
+    if (!compiled || (compiled.schemaVersion !== 2 && compiled.schemaVersion !== 3)) throw new Error("这份作品包的数据结构不是受支持的版本。");
     var empty = app.project.numItems === 0;
     report.mode = empty ? "create" : "append";
     if (!empty) VN.ensureExpressionEngineCompatible();

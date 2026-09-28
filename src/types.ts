@@ -1,4 +1,4 @@
-export const GENERATOR_VERSION = "0.2.0";
+export const GENERATOR_VERSION = "0.3.0";
 export const REVEAL_END_INDEX = 99999;
 
 export const FRAME_WIDTH = 1920;
@@ -287,8 +287,44 @@ export interface TimelineEntry {
   durationFrames: number;
 }
 
+export interface PauseMark {
+  afterUnit: number;
+  frames: number;
+}
+
+export interface EventBaseline {
+  eventId: string;
+  sceneId: string;
+  startFrame: number;
+  durationFrames: number;
+  animationStartFrame: number;
+  characterIntervalFrames: number;
+  charactersPerSecond: number;
+  characterFadeFrames: number;
+  pauses: PauseMark[];
+}
+
+export interface DependencyBaseline {
+  id: string;
+  kind: "scene-boundary" | "transition" | "background" | "overlay" | "audio" | "video";
+  sync: "managed" | "nonsync-music" | "sync" | "unclassified";
+  startFrame: number;
+  durationFrames: number;
+}
+
+export interface InstanceBaseline {
+  fps: number;
+  masterDurationFrames: number;
+  commaPauseFrames: number;
+  sentencePauseFrames: number;
+  events: EventBaseline[];
+  dependencies: DependencyBaseline[];
+}
+
 export interface CompiledProject {
-  schemaVersion: 2;
+  schemaVersion: 3;
+  packageHash: string;
+  baseline: InstanceBaseline;
   generatorVersion: string;
   id: string;
   buildId: string;

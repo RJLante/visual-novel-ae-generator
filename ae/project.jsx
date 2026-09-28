@@ -45,6 +45,8 @@ VN.prepareInstance = function (ctx, compiled) {
   ctx.instanceId = folderName;
   ctx.projectId = compiled.id;
   ctx.buildId = compiled.buildId;
+  ctx.schemaVersion = compiled.schemaVersion || 2;
+  ctx.packageHash = compiled.packageHash || "";
   ctx.generatorVersion = compiled.generatorVersion;
   if (!ctx.displayName) ctx.displayName = compiled.name || "";
   if (!ctx.versionLabel) ctx.versionLabel = "";
@@ -85,8 +87,8 @@ VN.resolveAssetFile = function (asset) {
 VN.buildProject = function (compiled, report, ctx) {
   var root = app.project.items.addFolder(ctx.folderName);
   ctx.folders.push(root);
-  VN.writeMeta(root, {
-    v: 2,
+  var instanceMeta = {
+    v: ctx.schemaVersion >= 3 ? 3 : 2,
     projectId: ctx.projectId,
     buildId: ctx.buildId,
     instanceId: ctx.instanceId,
@@ -94,7 +96,20 @@ VN.buildProject = function (compiled, report, ctx) {
     generatorVersion: ctx.generatorVersion,
     displayName: ctx.displayName,
     versionLabel: ctx.versionLabel
-  }, "");
+  };
+  if (ctx.schemaVersion >= 3) {
+    instanceMeta.schemaVersion = 3;
+    instanceMeta.identity = {
+      instanceId: ctx.instanceId,
+      packageId: compiled.id,
+      packageVersion: compiled.buildId,
+      packageHash: ctx.packageHash,
+      schemaVersion: 3
+    };
+    instanceMeta.baseline = compiled.baseline;
+    instanceMeta.current = { speed: 1, defaultEffect: "typewriter", revision: 1 };
+  }
+  VN.writeMeta(root, instanceMeta, "");
 
   var folders = { ROOT: root };
   var i;
@@ -129,7 +144,7 @@ VN.buildProject = function (compiled, report, ctx) {
     var comp = VN.addComp(folders[spec.folder] || folders.ROOT, aeName, spec.width, spec.height, spec.durationFrames, compiled.fps);
     ctx.comps.push(comp);
     var compMeta = {
-      v: 2,
+      v: ctx.schemaVersion >= 3 ? 3 : 2,
       projectId: ctx.projectId,
       buildId: ctx.buildId,
       instanceId: ctx.instanceId,
@@ -138,6 +153,11 @@ VN.buildProject = function (compiled, report, ctx) {
       displayName: ctx.displayName,
       versionLabel: ctx.versionLabel
     };
+    if (ctx.schemaVersion >= 3) {
+      compMeta.schemaVersion = 3;
+      compMeta.baseline = { durationFrames: spec.durationFrames };
+      compMeta.current = { revision: 1 };
+    }
     if (spec.logicalId === "global:control") {
       compMeta.fps = compiled.fps;
       compMeta.timing = compiled.timing;

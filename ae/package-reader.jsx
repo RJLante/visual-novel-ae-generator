@@ -81,7 +81,7 @@ VN.inspectPackage = function (manifestFile) {
       "packageVersion"
     );
   }
-  if (manifest.compiledSchemaVersion !== VN.SUPPORTED_SCHEMA_VERSION) {
+  if (manifest.compiledSchemaVersion !== 2 && manifest.compiledSchemaVersion !== 3) {
     return VN.inspectFailure(
       "无法导入：工程数据版本 " + manifest.compiledSchemaVersion + " 不受支持。",
       "请用当前生成器重新构建作品包。",

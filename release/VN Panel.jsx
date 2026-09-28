@@ -271,6 +271,8 @@ VN.prepareInstance = function (ctx, compiled) {
   ctx.instanceId = folderName;
   ctx.projectId = compiled.id;
   ctx.buildId = compiled.buildId;
+  ctx.schemaVersion = compiled.schemaVersion || 2;
+  ctx.packageHash = compiled.packageHash || "";
   ctx.generatorVersion = compiled.generatorVersion;
   if (!ctx.displayName) ctx.displayName = compiled.name || "";
   if (!ctx.versionLabel) ctx.versionLabel = "";
@@ -311,8 +313,8 @@ VN.resolveAssetFile = function (asset) {
 VN.buildProject = function (compiled, report, ctx) {
   var root = app.project.items.addFolder(ctx.folderName);
   ctx.folders.push(root);
-  VN.writeMeta(root, {
-    v: 2,
+  var instanceMeta = {
+    v: ctx.schemaVersion >= 3 ? 3 : 2,
     projectId: ctx.projectId,
     buildId: ctx.buildId,
     instanceId: ctx.instanceId,
@@ -320,7 +322,20 @@ VN.buildProject = function (compiled, report, ctx) {
     generatorVersion: ctx.generatorVersion,
     displayName: ctx.displayName,
     versionLabel: ctx.versionLabel
-  }, "");
+  };
+  if (ctx.schemaVersion >= 3) {
+    instanceMeta.schemaVersion = 3;
+    instanceMeta.identity = {
+      instanceId: ctx.instanceId,
+      packageId: compiled.id,
+      packageVersion: compiled.buildId,
+      packageHash: ctx.packageHash,
+      schemaVersion: 3
+    };
+    instanceMeta.baseline = compiled.baseline;
+    instanceMeta.current = { speed: 1, defaultEffect: "typewriter", revision: 1 };
+  }
+  VN.writeMeta(root, instanceMeta, "");
 
   var folders = { ROOT: root };
   var i;
@@ -355,7 +370,7 @@ VN.buildProject = function (compiled, report, ctx) {
     var comp = VN.addComp(folders[spec.folder] || folders.ROOT, aeName, spec.width, spec.height, spec.durationFrames, compiled.fps);
     ctx.comps.push(comp);
     var compMeta = {
-      v: 2,
+      v: ctx.schemaVersion >= 3 ? 3 : 2,
       projectId: ctx.projectId,
       buildId: ctx.buildId,
       instanceId: ctx.instanceId,
@@ -364,6 +379,11 @@ VN.buildProject = function (compiled, report, ctx) {
       displayName: ctx.displayName,
       versionLabel: ctx.versionLabel
     };
+    if (ctx.schemaVersion >= 3) {
+      compMeta.schemaVersion = 3;
+      compMeta.baseline = { durationFrames: spec.durationFrames };
+      compMeta.current = { revision: 1 };
+    }
     if (spec.logicalId === "global:control") {
       compMeta.fps = compiled.fps;
       compMeta.timing = compiled.timing;
@@ -543,7 +563,8 @@ VN.addLayer = function (comp, spec, assets, comps, folders, report, ctx) {
   VN.applyTransform(layer, comp, spec);
   VN.applyEffects(layer, spec);
   if (spec.kind === "text") VN.finishTextLayer(layer, comp, spec, report, ctx);
-  else if (spec.comment) VN.writeMeta(layer, VN.layerMeta(spec, ctx), spec.comment);
+  else VN.writeMeta(layer, VN.layerMeta(spec, ctx), spec.comment || "");
+  if (ctx.schemaVersion >= 3 && spec.kind !== "text") VN.sealLayerRecord(layer, comp);
   return layer;
 };
 
@@ -660,8 +681,8 @@ VN.applyTransform = function (layer, comp, spec) {
 
 VN.layerMeta = function (spec, ctx) {
   var animation = spec.textAnimation;
-  return {
-    v: 2,
+  var meta = {
+    v: ctx.schemaVersion >= 3 ? 3 : 2,
     projectId: ctx.projectId,
     buildId: ctx.buildId,
     instanceId: ctx.instanceId,
@@ -674,8 +695,31 @@ VN.layerMeta = function (spec, ctx) {
     holdIn: spec.holdInFrames,
     eventFrames: spec.eventFrames,
     reveal: animation ? VN.compactKeys(animation.revealKeys) : undefined,
-    opacity: animation ? VN.compactKeys(animation.opacityKeys) : undefined
+    opacity: animation ? VN.compactKeys(animation.opacityKeys) : undefined,
+    dependency: "managed"
   };
+  if (ctx.schemaVersion >= 3) {
+    meta.schemaVersion = 3;
+    if (animation && animation.preset === "typewriter") meta.effect = "typewriter";
+    meta.baseline = {
+      inFrame: spec.inFrame || 0,
+      outFrame: spec.outFrame === undefined ? null : spec.outFrame,
+      startFrame: spec.inFrame || 0,
+      opacity: VN.compactKeys(spec.opacityKeys),
+      reveal: animation ? VN.compactKeys(animation.revealKeys) : undefined,
+      position: VN.compactPosition(spec.positionKeys)
+    };
+    meta.current = { effect: meta.effect || "", speed: 1, revision: 1 };
+  }
+  return meta;
+};
+
+VN.compactPosition = function (keys) {
+  if (!keys || !keys.length) return undefined;
+  var out = [];
+  var i;
+  for (i = 0; i < keys.length; i++) out.push([keys[i].frame, keys[i].x, keys[i].y, keys[i].interp || "linear"]);
+  return out;
 };
 
 VN.correctBoxAnchor = function (layer, spec) {
@@ -746,6 +790,7 @@ VN.finishTextLayer = function (layer, comp, spec, report, ctx) {
   }
   if (spec.textAnimation && spec.textAnimation.revealKeys) VN.installRevealKeys(layer, comp, spec.textAnimation.revealKeys);
   VN.writeMeta(layer, VN.layerMeta(spec, ctx), spec.comment);
+  if (ctx.schemaVersion >= 3) VN.sealLayerRecord(layer, comp);
   VN.collectExpressionErrors(layer, comp, report);
 };
 
@@ -1053,6 +1098,431 @@ VN.scaleKeyframeSpacing = function (keys, speed) {
   var out = [];
   for (i = 0; i < frames.length; i++) out.push(byFrame[frames[i]]);
   return out;
+};
+
+var VN = VN || {};
+
+VN.segmentText = function (text) {
+  var units = [];
+  var source = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  var aeIndex = 0;
+  var i = 0;
+  while (i < source.length) {
+    if (source.charCodeAt(i) === 10) {
+      aeIndex += 1;
+      i += 1;
+      continue;
+    }
+    var mark = VN.readCluster(source, i);
+    units.push({ text: mark.text, aeIndex: aeIndex, aeLength: mark.aeLength });
+    aeIndex += mark.aeLength;
+    i += mark.aeLength;
+  }
+  return { units: units, aeLength: aeIndex };
+};
+
+VN.readCluster = function (text, index) {
+  var code = text.charCodeAt(index);
+  var aeLength = 1;
+  var chunk = text.charAt(index);
+  if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
+    chunk = text.substring(index, index + 2);
+    aeLength = 2;
+  }
+  var cursor = index + aeLength;
+  while (cursor < text.length && VN.extendsCluster(text, cursor)) {
+    var extra = text.charCodeAt(cursor) >= 0xd800 && text.charCodeAt(cursor) <= 0xdbff ? 2 : 1;
+    chunk += text.substring(cursor, cursor + extra);
+    aeLength += extra;
+    cursor += extra;
+  }
+  return { text: chunk, aeLength: aeLength };
+};
+
+VN.extendsCluster = function (text, index) {
+  var code = text.charCodeAt(index);
+  if (code === 10 || code === 13) return false;
+  if (code === 0x200d) return true;
+  if (index > 0 && text.charCodeAt(index - 1) === 0x200d) return true;
+  if (code === 0xfe0e || code === 0xfe0f) return true;
+  if (code >= 0x0300 && code <= 0x036f) return true;
+  if (code >= 0x1ab0 && code <= 0x1aff) return true;
+  if (code >= 0x1dc0 && code <= 0x1dff) return true;
+  if (code >= 0x20d0 && code <= 0x20ff) return true;
+  if (code >= 0xfe20 && code <= 0xfe2f) return true;
+  return false;
+};
+
+VN.pausesForText = function (text, commaFrames, sentenceFrames) {
+  var units = VN.segmentText(text).units;
+  var pauses = [];
+  var longChars = ".?!。？！…";
+  var shortChars = ",;:，；：、";
+  var i;
+  for (i = 0; i < units.length - 1; i++) {
+    if (longChars.indexOf(units[i].text) !== -1) pauses.push({ afterUnit: i, frames: sentenceFrames });
+    else if (shortChars.indexOf(units[i].text) !== -1) pauses.push({ afterUnit: i, frames: commaFrames });
+  }
+  return pauses;
+};
+
+VN.quantizeShared = function (frames, speed) {
+  var map = {};
+  var order = [];
+  var i;
+  for (i = 0; i < frames.length; i++) {
+    var frame = frames[i];
+    var key = String(frame);
+    if (map[key] === undefined) {
+      map[key] = Math.round(frame / speed);
+      order.push(frame);
+    }
+  }
+  return { map: map, order: order, speed: speed };
+};
+
+VN.lookupFrame = function (shared, frame) {
+  var found = shared.map[String(frame)];
+  if (found === undefined) return Math.round(frame / (shared.speed || 1));
+  return found;
+};
+
+VN.buildAnimationPlan = function (text, effect, speed, timing, availableTime) {
+  if (!(speed > 0)) throw new Error("速度倍率必须大于 0");
+  var segmented = VN.segmentText(text);
+  var pauses = timing.pauses || [];
+  var relative = [];
+  var carried = 0;
+  var i;
+  for (i = 0; i < segmented.units.length; i++) {
+    relative.push(Math.round((i * timing.fps) / timing.charactersPerSecond) + carried);
+    var p;
+    for (p = 0; p < pauses.length; p++) if (pauses[p].afterUnit === i) carried += pauses[p].frames;
+  }
+  var aeAppear = [];
+  for (i = 0; i < segmented.aeLength; i++) aeAppear.push(0);
+  for (i = 0; i < segmented.units.length; i++) {
+    var unit = segmented.units[i];
+    var n;
+    for (n = 0; n < unit.aeLength; n++) aeAppear[unit.aeIndex + n] = relative[i];
+  }
+  for (i = 0; i < segmented.aeLength; i++) {
+    if (VN.unitCovers(segmented.units, i)) continue;
+    var next = null;
+    var u;
+    for (u = 0; u < segmented.units.length; u++) {
+      if (segmented.units[u].aeIndex > i) {
+        next = segmented.units[u];
+        aeAppear[i] = relative[u];
+        break;
+      }
+    }
+    if (!next && relative.length) aeAppear[i] = relative[relative.length - 1];
+  }
+  var holdIn = timing.holdInFrames || 0;
+  var baseReveal = VN.revealKeyframes(aeAppear, holdIn);
+  var fadeSpan = timing.characterFadeFrames || 0;
+  var baseFade = [];
+  for (i = 0; i < segmented.units.length; i++) {
+    baseFade.push(VN.fadeKeys(holdIn + relative[i], fadeSpan));
+  }
+  var pauseSum = 0;
+  for (i = 0; i < pauses.length; i++) pauseSum += pauses[i].frames;
+  var typewriterEnd = holdIn + Math.round((segmented.units.length * timing.fps) / timing.charactersPerSecond) + pauseSum;
+  var lastRelative = relative.length ? relative[relative.length - 1] : 0;
+  var fadeCompletion = holdIn + lastRelative + fadeSpan;
+  var boundaries = [typewriterEnd, fadeCompletion, holdIn, 0];
+  for (i = 0; i < baseReveal.length; i++) boundaries.push(baseReveal[i].frame);
+  for (i = 0; i < baseFade.length; i++) {
+    for (n = 0; n < baseFade[i].length; n++) boundaries.push(baseFade[i][n].frame);
+  }
+  var shared = VN.quantizeShared(boundaries, speed);
+  var revealKeys = VN.remapKeys(baseReveal, shared);
+  var fadeTracks = [];
+  if (effect === "characterFade") {
+    for (i = 0; i < segmented.units.length; i++) {
+      fadeTracks.push({
+        aeIndex: segmented.units[i].aeIndex,
+        aeLength: segmented.units[i].aeLength,
+        keys: VN.remapKeys(baseFade[i], shared)
+      });
+    }
+  }
+  var lastReveal = revealKeys.length ? revealKeys[revealKeys.length - 1].frame : 0;
+  var completion = effect === "characterFade" ? VN.lookupFrame(shared, fadeCompletion) : lastReveal;
+  var required = effect === "characterFade" ? completion : VN.lookupFrame(shared, typewriterEnd);
+  return {
+    effect: effect,
+    units: segmented.units,
+    pauses: pauses,
+    revealKeys: revealKeys,
+    fadeTracks: fadeTracks,
+    completionFrame: completion,
+    requiredFrames: required,
+    fits: required <= availableTime
+  };
+};
+
+VN.fadeKeys = function (start, fadeFrames) {
+  if (fadeFrames <= 0) return [{ frame: start, value: 100, interpolation: "linear" }];
+  if (start <= 0) {
+    return [
+      { frame: 0, value: 0, interpolation: "linear" },
+      { frame: fadeFrames, value: 100, interpolation: "linear" }
+    ];
+  }
+  return [
+    { frame: 0, value: 0, interpolation: "linear" },
+    { frame: start, value: 0, interpolation: "linear" },
+    { frame: start + fadeFrames, value: 100, interpolation: "linear" }
+  ];
+};
+
+VN.remapKeys = function (keys, shared) {
+  var frames = [];
+  var byFrame = {};
+  var i;
+  for (i = 0; i < keys.length; i++) {
+    var frame = VN.lookupFrame(shared, keys[i].frame);
+    if (byFrame[frame] === undefined) frames.push(frame);
+    byFrame[frame] = { frame: frame, value: keys[i].value, interpolation: keys[i].interpolation || "hold" };
+  }
+  frames.sort(function (a, b) { return a - b; });
+  var out = [];
+  for (i = 0; i < frames.length; i++) out.push(byFrame[frames[i]]);
+  return out;
+};
+
+VN.unitCovers = function (units, aeIndex) {
+  var i;
+  for (i = 0; i < units.length; i++) {
+    if (aeIndex >= units[i].aeIndex && aeIndex < units[i].aeIndex + units[i].aeLength) return true;
+  }
+  return false;
+};
+
+VN.mapBaselineFrames = function (frames, speed) {
+  return VN.quantizeShared(frames, speed);
+};
+
+var VN = VN || {};
+
+VN.instanceFolderMeta = function (instanceId) {
+  var i;
+  for (i = 1; i <= app.project.numItems; i++) {
+    var item = app.project.item(i);
+    var meta = null;
+    try {
+      meta = VN.readMeta(item.comment);
+    } catch (ignore) {}
+    if (!meta || meta.logicalId !== "instance" || meta.instanceId !== instanceId) continue;
+    return { item: item, meta: meta };
+  }
+  return null;
+};
+
+VN.capabilitiesFor = function (instanceId) {
+  var found = VN.instanceFolderMeta(instanceId);
+  var meta = found ? found.meta : null;
+  var full = !!(meta && meta.v === 3 && meta.baseline && meta.baseline.events);
+  var current = meta && meta.current ? meta.current : null;
+  return {
+    full: full,
+    style: full ? "editor" : "legacy",
+    effect: full,
+    speed: full,
+    rebuild: !!(meta && (meta.v === 2 || meta.v === 3)),
+    speedValue: current && current.speed ? current.speed : 1,
+    defaultEffect: current && current.defaultEffect ? current.defaultEffect : "typewriter",
+    fps: full ? meta.baseline.fps : 30,
+    revision: current && current.revision ? current.revision : 0,
+    displayName: meta && meta.displayName ? meta.displayName : ""
+  };
+};
+
+VN.effectLabel = function (effect) {
+  return effect === "characterFade" ? "透明度逐字显示" : "打字机";
+};
+
+VN.isSupportedTextMeta = function (meta) {
+  if (!meta || !meta.instanceId) return false;
+  if (meta.effect === "typewriter" || meta.effect === "characterFade") return true;
+  return meta.preset === "typewriter" || meta.preset === "lines";
+};
+
+VN.isManagedAnimatorName = function (name) {
+  if (name === "REVEAL") return true;
+  return /^VN_FADE_\d+$/.test(name);
+};
+
+VN.canonical = function (value) {
+  return JSON.stringify(value);
+};
+
+VN.sealLayerRecord = function (layer, comp) {
+  var meta = VN.readMeta(layer.comment);
+  if (!meta || meta.v !== 3) return;
+  meta.current = meta.current || {};
+  meta.current.animationSignature = VN.animationSignature(layer, comp, meta);
+  meta.current.timingSignature = VN.timingSignature(layer, comp);
+  meta.current.speed = meta.current.speed || 1;
+  meta.current.revision = meta.current.revision || 1;
+  VN.writeMeta(layer, meta);
+};
+
+VN.animationSignature = function (layer, comp, meta) {
+  var managed = [];
+  var textProps = layer.property("ADBE Text Properties");
+  if (textProps !== null) {
+    var animators = textProps.property("ADBE Text Animators");
+    if (animators !== null) {
+      var i;
+      for (i = 1; i <= animators.numProperties; i++) {
+        var anim = animators.property(i);
+        if (!VN.isManagedAnimatorName(anim.name)) continue;
+        var opacity = anim.property("ADBE Text Animator Properties");
+        var opacityValue = null;
+        var opacityKeys = [];
+        if (opacity !== null) {
+          var opacityProp = opacity.property("ADBE Text Opacity");
+          if (opacityProp !== null) {
+            if (opacityProp.numKeys) opacityKeys = VN.readScalarKeys(opacityProp, comp);
+            else opacityValue = opacityProp.value;
+          }
+        }
+        var selector = null;
+        var selectors = anim.property("ADBE Text Selectors");
+        if (selectors !== null && selectors.numProperties) selector = selectors.property(1);
+        var startKeys = [];
+        var endValue = null;
+        var amountValue = null;
+        var expression = "";
+        if (selector) {
+          var start = VN.selectorProp(selector, "ADBE Text Index Start");
+          if (start) {
+            startKeys = VN.readScalarKeys(start, comp);
+            expression = start.expression || "";
+          }
+          var end = VN.selectorProp(selector, "ADBE Text Index End");
+          if (end && !end.numKeys) endValue = end.value;
+          var amount = selector.property("ADBE Text Selector Max Amount");
+          if (amount && !amount.numKeys) amountValue = amount.value;
+        }
+        managed.push({
+          name: anim.name,
+          opacityValue: opacityValue,
+          opacityKeys: VN.compactKeys(opacityKeys) || [],
+          startKeys: VN.compactKeys(startKeys) || [],
+          endValue: endValue,
+          amountValue: amountValue,
+          expression: expression
+        });
+      }
+    }
+  }
+  var opacityLayer = null;
+  try {
+    opacityLayer = VN.opacityProp(layer);
+  } catch (ignoreOpacity) {}
+  var layerOpacity = [];
+  if (opacityLayer && opacityLayer.numKeys) layerOpacity = VN.compactKeys(VN.readScalarKeys(opacityLayer, comp)) || [];
+  return VN.canonical({ effect: meta.effect || meta.preset || "", managed: managed, opacity: layerOpacity });
+};
+
+VN.timingSignature = function (layer, comp) {
+  var remap = false;
+  try {
+    remap = !!layer.timeRemapEnabled;
+  } catch (ignore) {}
+  return VN.canonical({
+    inFrame: Math.round(layer.inPoint / comp.frameDuration),
+    outFrame: Math.round(layer.outPoint / comp.frameDuration),
+    startFrame: Math.round(layer.startTime / comp.frameDuration),
+    stretch: Math.round(layer.stretch * 1000) / 1000,
+    timeRemap: remap,
+    compDurationFrames: Math.round(comp.duration / comp.frameDuration)
+  });
+};
+
+VN.instanceFingerprint = function (instanceId) {
+  var parts = [];
+  var folder = VN.instanceFolderMeta(instanceId);
+  parts.push(folder ? VN.canonical(folder.meta.current || {}) : "missing");
+  var i;
+  for (i = 1; i <= app.project.numItems; i++) {
+    var item = app.project.item(i);
+    var meta = null;
+    try {
+      meta = VN.readMeta(item.comment);
+    } catch (ignore) {}
+    if (!meta || meta.instanceId !== instanceId || meta.logicalId === "instance") continue;
+    parts.push(item.name + ":" + VN.canonical(meta.current || meta.preset || ""));
+  }
+  parts.sort();
+  return parts.join("\n");
+};
+
+VN.captureLock = function (instanceId) {
+  return {
+    instanceId: instanceId,
+    fingerprint: VN.instanceFingerprint(instanceId),
+    identity: VN.instanceIdentity(instanceId)
+  };
+};
+
+VN.instanceIdentity = function (instanceId) {
+  var found = VN.instanceFolderMeta(instanceId);
+  if (!found || !found.meta) return null;
+  if (found.meta.identity) return found.meta.identity;
+  return {
+    instanceId: instanceId,
+    packageId: found.meta.projectId || "",
+    packageVersion: found.meta.buildId || "",
+    packageHash: "",
+    schemaVersion: found.meta.v || 2
+  };
+};
+
+VN.lockMatches = function (lock) {
+  if (!lock || !lock.instanceId) return false;
+  var identity = VN.instanceIdentity(lock.instanceId);
+  if (!identity) return false;
+  var previous = lock.identity || {};
+  if (previous.packageId && identity.packageId !== previous.packageId) return false;
+  if (previous.packageHash && identity.packageHash !== previous.packageHash) return false;
+  return VN.instanceFingerprint(lock.instanceId) === lock.fingerprint;
+};
+
+VN.eventBaseline = function (instanceId, eventId) {
+  var found = VN.instanceFolderMeta(instanceId);
+  if (!found || !found.meta.baseline || !found.meta.baseline.events) return null;
+  var events = found.meta.baseline.events;
+  var i;
+  for (i = 0; i < events.length; i++) if (events[i].eventId === eventId) return { baseline: found.meta.baseline, event: events[i] };
+  return { baseline: found.meta.baseline, event: null };
+};
+
+VN.masterCompFor = function (instanceId) {
+  var i;
+  for (i = 1; i <= app.project.numItems; i++) {
+    var item = app.project.item(i);
+    if (!(item instanceof CompItem)) continue;
+    var meta = VN.readMeta(item.comment);
+    if (meta && meta.instanceId === instanceId && meta.logicalId === "master") return item;
+  }
+  return null;
+};
+
+VN.compsForInstance = function (instanceId) {
+  var comps = [];
+  var i;
+  for (i = 1; i <= app.project.numItems; i++) {
+    var item = app.project.item(i);
+    if (!(item instanceof CompItem)) continue;
+    var meta = VN.readMeta(item.comment);
+    if (meta && meta.instanceId === instanceId) comps.push({ comp: item, meta: meta });
+  }
+  return comps;
 };
 
 var VN = VN || {};
@@ -1634,7 +2104,7 @@ VN.inspectPackage = function (manifestFile) {
       "packageVersion"
     );
   }
-  if (manifest.compiledSchemaVersion !== VN.SUPPORTED_SCHEMA_VERSION) {
+  if (manifest.compiledSchemaVersion !== 2 && manifest.compiledSchemaVersion !== 3) {
     return VN.inspectFailure(
       "无法导入：工程数据版本 " + manifest.compiledSchemaVersion + " 不受支持。",
       "请用当前生成器重新构建作品包。",
@@ -1743,49 +2213,73 @@ VN.describeInstance = function (meta) {
   };
 };
 
+VN.isGeneratedLogical = function (logicalId) {
+  if (!logicalId) return false;
+  if (logicalId === "master" || logicalId === "overlay" || logicalId === "global:control") return true;
+  if (logicalId.indexOf("scene:") === 0 || logicalId.indexOf("event:") === 0 || logicalId.indexOf("style:") === 0) return true;
+  return false;
+};
+
+VN.listHas = function (list, value) {
+  var i;
+  for (i = 0; i < list.length; i++) if (list[i] === value) return true;
+  return false;
+};
+
 VN.resolveContext = function () {
   var active = app.project.activeItem;
   var textLayers = [];
-  var instanceIds = [];
-  var instanceMeta = null;
-  var insertTarget = VN.currentInsertTarget();
-
-  function remember(meta) {
-    var n;
-    for (n = 0; n < instanceIds.length; n++) {
-      if (instanceIds[n] === meta.instanceId) return;
-    }
-    instanceIds.push(meta.instanceId);
-    if (!instanceMeta) instanceMeta = meta;
+  if (!(active instanceof CompItem)) {
+    return { status: "none", instanceId: "", instanceIds: [], textLayers: [], instance: null, message: "" };
   }
-
-  if (active instanceof CompItem && active.selectedLayers.length) {
-    var i;
-    for (i = 0; i < active.selectedLayers.length; i++) {
-      var layer = active.selectedLayers[i];
-      var meta = VN.readMeta(layer.comment);
-      if (!meta || meta.v !== 2 || !meta.instanceId) continue;
-      remember(meta);
-      if (layer.property("ADBE Text Properties") !== null && (meta.preset === "typewriter" || meta.preset === "lines")) {
-        var preview = "";
-        try {
-          preview = layer.property("ADBE Text Properties").property("ADBE Text Document").value.text;
-        } catch (ignoreText) {}
-        textLayers.push({ layer: layer, comp: active, preview: preview, meta: meta });
+  textLayers = VN.supportedSelection(active);
+  var own = VN.readMeta(active.comment);
+  if (own && own.instanceId && VN.isGeneratedLogical(own.logicalId)) {
+    return {
+      status: "unique",
+      instanceId: own.instanceId,
+      instanceIds: [own.instanceId],
+      textLayers: textLayers,
+      instance: VN.describeInstance(own),
+      message: ""
+    };
+  }
+  var ids = [];
+  var i;
+  for (i = 1; i <= active.numLayers; i++) {
+    var layer = active.layer(i);
+    var meta = VN.readMeta(layer.comment);
+    if (meta && meta.instanceId) {
+      if (!VN.listHas(ids, meta.instanceId)) ids.push(meta.instanceId);
+    }
+    try {
+      if (layer.source instanceof CompItem) {
+        var sourceMeta = VN.readMeta(layer.source.comment);
+        if (sourceMeta && sourceMeta.instanceId && !VN.listHas(ids, sourceMeta.instanceId)) ids.push(sourceMeta.instanceId);
       }
-    }
-    if (instanceIds.length > 1) return { state: "ambiguous", instance: null, textLayers: textLayers, insertTarget: insertTarget };
-    if (instanceIds.length === 1) {
-      return { state: "instance", instance: VN.describeInstance(instanceMeta), textLayers: textLayers, insertTarget: insertTarget };
+    } catch (ignoreSource) {}
+  }
+  if (!ids.length) {
+    for (i = 0; i < textLayers.length; i++) {
+      if (!VN.listHas(ids, textLayers[i].meta.instanceId)) ids.push(textLayers[i].meta.instanceId);
     }
   }
-  if (active instanceof CompItem) {
-    var own = VN.readMeta(active.comment);
-    if (own && own.v === 2 && own.instanceId) {
-      return { state: "instance", instance: VN.describeInstance(own), textLayers: textLayers, insertTarget: insertTarget };
-    }
+  if (ids.length > 1) {
+    return {
+      status: "ambiguous",
+      instanceId: "",
+      instanceIds: ids,
+      textLayers: textLayers,
+      instance: null,
+      message: "这里有多份片段。请打开要编辑的生成合成。"
+    };
   }
-  return { state: "empty", instance: null, textLayers: [], insertTarget: insertTarget };
+  if (ids.length === 1) {
+    var folder = VN.instanceFolderMeta(ids[0]);
+    var described = folder ? VN.describeInstance(folder.meta) : { instanceId: ids[0], projectId: "", buildId: "", displayName: ids[0], versionLabel: "" };
+    return { status: "unique", instanceId: ids[0], instanceIds: ids, textLayers: textLayers, instance: described, message: "" };
+  }
+  return { status: "none", instanceId: "", instanceIds: [], textLayers: [], instance: null, message: "" };
 };
 
 VN.findBuildInstances = function (projectId, buildId) {
@@ -1816,6 +2310,1212 @@ VN.openLogicalComp = function (instanceId, logicalId) {
     return { ok: true, message: "", comp: item };
   }
   return { ok: false, message: logicalId === "master" ? "找不到这个片段的主合成。" : "找不到这个片段的全局样式。" };
+};
+
+var VN = VN || {};
+
+VN.itemResult = function (status, reason, instanceId, message, layer, eventId) {
+  return {
+    status: status,
+    reason: reason,
+    instanceId: instanceId || "",
+    eventId: eventId || "",
+    layerName: layer ? layer.name : "",
+    message: message
+  };
+};
+
+VN.finishOperation = function (operation, items, extra) {
+  var updated = 0;
+  var skipped = 0;
+  var failed = 0;
+  var i;
+  for (i = 0; i < items.length; i++) {
+    if (items[i].status === "updated") updated += 1;
+    else if (items[i].status === "skipped") skipped += 1;
+    else failed += 1;
+  }
+  var status = "failed";
+  if (updated && !skipped && !failed) status = "updated";
+  else if (updated) status = "partial";
+  else if (!failed && skipped) status = "skipped";
+  var applied = status === "updated" || status === "partial" ? extra : null;
+  return {
+    status: status,
+    operation: operation,
+    items: items,
+    appliedSpeed: applied ? extra.appliedSpeed : undefined,
+    durationFrames: applied ? extra.durationFrames : undefined,
+    message: VN.operationMessage(operation, status, updated, skipped, failed, items, extra || {})
+  };
+};
+
+VN.operationMessage = function (operation, status, updated, skipped, failed, items, extra) {
+  if (operation === "speed") {
+    if (status === "updated" || status === "partial") return "速度已调整为 " + extra.appliedSpeed + " 倍。";
+    return items.length ? items[0].message : "未调整速度：片段保持原样。";
+  }
+  if (operation === "effect") {
+    if (!updated) return items.length ? items[0].message : "效果没有改变。";
+    if (!skipped && !failed) return "效果已应用到 " + updated + " 段。";
+    return "效果已应用到 " + updated + " 段；" + (skipped + failed) + " 段保留原效果。";
+  }
+  if (operation === "rebuild") {
+    if (updated && !skipped && !failed) return "已更新 " + updated + " 段文字。";
+    if (updated && skipped && !failed) {
+      var manual = 0;
+      var n;
+      for (n = 0; n < items.length; n++) if (items[n].status === "skipped" && items[n].reason === "manual_edit") manual += 1;
+      if (manual === skipped) return "已更新 " + updated + " 段，跳过 " + manual + " 段手动动画。";
+      return "已更新 " + updated + " 段，跳过 " + skipped + " 段。";
+    }
+    if (updated) return "已更新 " + updated + " 段，" + failed + " 段失败。";
+    return items.length ? items[0].message : "未更新。";
+  }
+  if (status === "updated") return "样式已更新。";
+  return items.length ? items[0].message : "样式没有写入。";
+};
+
+VN.timedLogical = function (logicalId) {
+  if (!logicalId) return false;
+  if (logicalId === "master" || logicalId === "overlay") return true;
+  if (logicalId.indexOf("scene:") === 0 || logicalId.indexOf("event:") === 0) return true;
+  return false;
+};
+
+VN.supportedSelection = function (comp) {
+  var layers = [];
+  if (!comp || !comp.selectedLayers) return layers;
+  var i;
+  for (i = 0; i < comp.selectedLayers.length; i++) {
+    var layer = comp.selectedLayers[i];
+    if (layer.property("ADBE Text Properties") === null) continue;
+    var meta = VN.readMeta(layer.comment);
+    if (!VN.isSupportedTextMeta(meta)) continue;
+    layers.push({ layer: layer, comp: comp, meta: meta });
+  }
+  return layers;
+};
+
+VN.modernTextLayers = function (instanceId) {
+  var found = [];
+  var comps = VN.compsForInstance(instanceId);
+  var i;
+  for (i = 0; i < comps.length; i++) {
+    var comp = comps[i].comp;
+    var n;
+    for (n = 1; n <= comp.numLayers; n++) {
+      var layer = comp.layer(n);
+      if (layer.property("ADBE Text Properties") === null) continue;
+      var meta = VN.readMeta(layer.comment);
+      if (!meta || meta.instanceId !== instanceId) continue;
+      if (meta.effect !== "typewriter" && meta.effect !== "characterFade") continue;
+      found.push({ layer: layer, comp: comp, meta: meta });
+    }
+  }
+  return found;
+};
+
+VN.availableFrames = function (layer, comp, instanceId) {
+  var remap = false;
+  try {
+    remap = !!layer.timeRemapEnabled;
+  } catch (ignore) {}
+  if (remap || Math.abs(layer.stretch - 100) > 0.01) return { ok: false, reason: "unreliable_time" };
+  var frames = Math.round((layer.outPoint - layer.inPoint) / comp.frameDuration);
+  var parent = VN.parentWindow(comp, instanceId, {});
+  if (!parent.ok) return parent;
+  if (parent.frames !== null && parent.frames < frames) frames = parent.frames;
+  return { ok: true, frames: frames };
+};
+
+VN.parentWindow = function (comp, instanceId, seen) {
+  if (seen[comp.id]) return { ok: false, reason: "unreliable_time" };
+  seen[comp.id] = true;
+  var parents = [];
+  var i;
+  for (i = 1; i <= app.project.numItems; i++) {
+    var item = app.project.item(i);
+    if (!(item instanceof CompItem) || item === comp) continue;
+    var host = VN.readMeta(item.comment);
+    if (!host || host.instanceId !== instanceId) continue;
+    var n;
+    for (n = 1; n <= item.numLayers; n++) {
+      var layer = item.layer(n);
+      if (layer.source !== comp) continue;
+      parents.push({ layer: layer, comp: item });
+    }
+  }
+  if (parents.length > 1) return { ok: false, reason: "unreliable_time" };
+  if (!parents.length) return { ok: true, frames: null };
+  var parent = parents[0];
+  var remap = false;
+  try {
+    remap = !!parent.layer.timeRemapEnabled;
+  } catch (ignoreRemap) {}
+  if (remap || parent.layer.stretch < 0 || Math.abs(parent.layer.stretch - 100) > 0.01) return { ok: false, reason: "unreliable_time" };
+  var frames = Math.round((parent.layer.outPoint - parent.layer.inPoint) / parent.comp.frameDuration);
+  var above = VN.parentWindow(parent.comp, instanceId, seen);
+  if (!above.ok) return above;
+  if (above.frames !== null && above.frames < frames) frames = above.frames;
+  return { ok: true, frames: frames };
+};
+
+VN.animationChanged = function (layer, comp, meta) {
+  if (!meta.current || !meta.current.animationSignature) return meta.v === 3;
+  return VN.animationSignature(layer, comp, meta) !== meta.current.animationSignature;
+};
+
+VN.timingChanged = function (layer, comp, meta) {
+  if (!meta.current || !meta.current.timingSignature) return true;
+  return VN.timingSignature(layer, comp) !== meta.current.timingSignature;
+};
+
+VN.snapshotAnimators = function (layer, comp) {
+  var saved = [];
+  var textProps = layer.property("ADBE Text Properties");
+  if (textProps === null) return saved;
+  var animators = textProps.property("ADBE Text Animators");
+  if (animators === null) return saved;
+  var i;
+  for (i = 1; i <= animators.numProperties; i++) {
+    var anim = animators.property(i);
+    if (!VN.isManagedAnimatorName(anim.name)) continue;
+    var opacityKeys = [];
+    var opacityValue = 0;
+    var group = anim.property("ADBE Text Animator Properties");
+    if (group !== null) {
+      var opacity = group.property("ADBE Text Opacity");
+      if (opacity !== null) {
+        if (opacity.numKeys) opacityKeys = VN.readScalarKeys(opacity, comp);
+        else opacityValue = opacity.value;
+      }
+    }
+    var startKeys = [];
+    var endValue = VN.REVEAL_END_INDEX;
+    var amountValue = 100;
+    var selectors = anim.property("ADBE Text Selectors");
+    if (selectors !== null && selectors.numProperties) {
+      var selector = selectors.property(1);
+      var start = VN.selectorProp(selector, "ADBE Text Index Start");
+      if (start) startKeys = VN.readScalarKeys(start, comp);
+      var end = VN.selectorProp(selector, "ADBE Text Index End");
+      if (end && !end.numKeys) endValue = end.value;
+      var amount = selector.property("ADBE Text Selector Max Amount");
+      if (amount && !amount.numKeys) amountValue = amount.value;
+    }
+    saved.push({ name: anim.name, opacityKeys: opacityKeys, opacityValue: opacityValue, startKeys: startKeys, endValue: endValue, amountValue: amountValue });
+  }
+  return saved;
+};
+
+VN.restoreAnimators = function (layer, comp, saved) {
+  VN.removeManagedAnimators(layer);
+  var i;
+  for (i = 0; i < saved.length; i++) {
+    var item = saved[i];
+    if (item.name === "REVEAL") VN.installRevealKeys(layer, comp, item.startKeys);
+    else VN.installFadeAnimator(layer, comp, item);
+  }
+};
+
+VN.removeManagedAnimators = function (layer) {
+  var textProps = layer.property("ADBE Text Properties");
+  if (textProps === null) return;
+  var animators = textProps.property("ADBE Text Animators");
+  if (animators === null) return;
+  var i;
+  for (i = animators.numProperties; i >= 1; i--) {
+    if (VN.isManagedAnimatorName(animators.property(i).name)) animators.property(i).remove();
+  }
+};
+
+VN.foreignAnimatorConflict = function (layer) {
+  var textProps = layer.property("ADBE Text Properties");
+  if (textProps === null) return false;
+  var animators = textProps.property("ADBE Text Animators");
+  if (animators === null) return false;
+  var i;
+  for (i = 1; i <= animators.numProperties; i++) {
+    var anim = animators.property(i);
+    if (VN.isManagedAnimatorName(anim.name)) continue;
+    var group = anim.property("ADBE Text Animator Properties");
+    if (group !== null && group.property("ADBE Text Opacity") !== null) return true;
+    if (anim.property("ADBE Text Selectors") !== null) return true;
+  }
+  return false;
+};
+
+VN.installFadeAnimator = function (layer, comp, track) {
+  var animators = VN.requireProp(VN.requireProp(layer, "ADBE Text Properties"), "ADBE Text Animators");
+  var anim = animators.addProperty("ADBE Text Animator");
+  anim.name = track.name || "VN_FADE_0";
+  var opacity = VN.requireProp(anim, "ADBE Text Animator Properties").addProperty("ADBE Text Opacity");
+  if (track.opacityKeys && track.opacityKeys.length) VN.applyScalarKeys(opacity, comp, track.opacityKeys);
+  else opacity.setValue(track.opacityValue === undefined ? 0 : track.opacityValue);
+  var selector = VN.requireProp(anim, "ADBE Text Selectors").addProperty("ADBE Text Selector");
+  selector.name = "RANGE";
+  VN.setSelectorValue(selector, "ADBE Text Range Units", 2);
+  VN.setSelectorValue(selector, "ADBE Text Range Type2", 1);
+  VN.setSelectorValue(selector, "ADBE Text Range Shape", 1);
+  var end = VN.selectorProp(selector, "ADBE Text Index End");
+  var start = VN.selectorProp(selector, "ADBE Text Index Start");
+  if (start) start.setValue(track.aeIndex === undefined ? 0 : track.aeIndex);
+  if (end) end.setValue(track.endValue !== undefined ? track.endValue : (track.aeIndex || 0) + (track.aeLength || 1));
+  if (track.startKeys && track.startKeys.length && start) VN.applyScalarKeys(start, comp, track.startKeys);
+  var amount = selector.property("ADBE Text Selector Max Amount");
+  if (amount) amount.setValue(track.amountValue === undefined ? 100 : track.amountValue);
+};
+
+VN.writePlan = function (layer, comp, plan) {
+  VN.removeManagedAnimators(layer);
+  if (plan.effect === "characterFade") {
+    var i;
+    for (i = 0; i < plan.fadeTracks.length; i++) {
+      var track = plan.fadeTracks[i];
+      VN.installFadeAnimator(layer, comp, {
+        name: "VN_FADE_" + i,
+        aeIndex: track.aeIndex,
+        aeLength: track.aeLength,
+        opacityKeys: track.keys,
+        opacityValue: 0
+      });
+    }
+    return;
+  }
+  VN.installRevealKeys(layer, comp, plan.revealKeys);
+};
+
+VN.rebuildModern = function (target) {
+  var layer = target.layer;
+  var comp = target.comp;
+  var meta = VN.readMeta(layer.comment);
+  if (VN.foreignAnimatorConflict(layer)) {
+    return VN.itemResult("skipped", "manual_edit", meta.instanceId, layer.name + "：有无法判断的动画，已跳过。", layer, meta.eventId);
+  }
+  if (VN.animationChanged(layer, comp, meta)) {
+    return VN.itemResult("skipped", "manual_edit", meta.instanceId, layer.name + "：动画已被手动修改，已跳过。", layer, meta.eventId);
+  }
+  var time = VN.availableFrames(layer, comp, meta.instanceId);
+  if (!time.ok) {
+    return VN.itemResult("skipped", "unreliable_time", meta.instanceId, layer.name + "：无法确定这段文字的可用时间。", layer, meta.eventId);
+  }
+  var located = VN.eventBaseline(meta.instanceId, meta.eventId);
+  if (!located || !located.event) {
+    return VN.itemResult("failed", "unsupported_schema", meta.instanceId, layer.name + "：没有导入基准，不能重算。", layer, meta.eventId);
+  }
+  var text = VN.readBaseText(layer);
+  var pauses = VN.pausesForText(text, located.baseline.commaPauseFrames || 0, located.baseline.sentencePauseFrames || 0);
+  var speed = located.baseline && VN.capabilitiesFor(meta.instanceId).speedValue;
+  var plan = VN.buildAnimationPlan(text, meta.effect || "typewriter", speed || 1, {
+    charactersPerSecond: located.event.charactersPerSecond,
+    fps: located.baseline.fps,
+    holdInFrames: located.event.animationStartFrame || 0,
+    characterFadeFrames: located.event.characterFadeFrames || 0,
+    pauses: pauses
+  }, time.frames);
+  if (!plan.fits) {
+    return VN.itemResult("skipped", "insufficient_duration", meta.instanceId, "未更新：这段文字需要更长的显示时间。请延长片段后重试。", layer, meta.eventId);
+  }
+  var saved = VN.snapshotAnimators(layer, comp);
+  var previous = layer.comment;
+  try {
+    VN.writePlan(layer, comp, plan);
+    meta.effect = plan.effect;
+    meta.reveal = VN.compactKeys(plan.revealKeys);
+    meta.current = meta.current || {};
+    meta.current.effect = plan.effect;
+    VN.writeMeta(layer, meta);
+    VN.sealLayerRecord(layer, comp);
+    return VN.itemResult("updated", null, meta.instanceId, layer.name + "：已更新。", layer, meta.eventId);
+  } catch (err) {
+    try {
+      VN.restoreAnimators(layer, comp, saved);
+      layer.comment = previous;
+    } catch (rollback) {
+      return VN.itemResult("failed", "rollback_failed", meta.instanceId, layer.name + "：恢复失败。" + rollback.toString(), layer, meta.eventId);
+    }
+    return VN.itemResult("failed", "write_failed", meta.instanceId, layer.name + "：写入失败，已恢复。" + err.toString(), layer, meta.eventId);
+  }
+};
+
+VN.rebuildLegacy = function (target) {
+  var layer = target.layer;
+  var comp = target.comp;
+  var meta = VN.readMeta(layer.comment);
+  if (meta.preset !== "typewriter" && meta.preset !== "lines") {
+    return VN.itemResult("skipped", "unsupported_schema", meta.instanceId, layer.name + "：这个效果不能按新文案重建。", layer, meta.eventId);
+  }
+  var start = VN.findRevealStart(layer);
+  if (!start || !VN.keysMatch(VN.readScalarKeys(start, comp), meta.reveal)) {
+    return VN.itemResult("skipped", "manual_edit", meta.instanceId, layer.name + "：动画已被手动修改，已跳过。", layer, meta.eventId);
+  }
+  var timingInfo = VN.instanceTiming(meta.instanceId);
+  if (!timingInfo) return VN.itemResult("failed", "unsupported_schema", meta.instanceId, layer.name + "：找不到节奏参数。", layer, meta.eventId);
+  var raw = VN.readBaseText(layer);
+  var plan = VN.planCharacters(raw, timingInfo.timing, timingInfo.fps);
+  var needed = meta.preset === "lines" ? plan.lineRevealFrames : plan.typewriterRevealFrames;
+  if (meta.eventFrames !== undefined && needed > meta.eventFrames) {
+    return VN.itemResult("skipped", "insufficient_duration", meta.instanceId, "未更新：这段文字需要更长的显示时间。请延长片段后重试。", layer, meta.eventId);
+  }
+  var saved = VN.snapshotAnimators(layer, comp);
+  var previous = layer.comment;
+  try {
+    var frames = meta.preset === "lines" ? plan.lineFrames : plan.revealFrames;
+    var keys = VN.scaleKeyframeSpacing(VN.revealKeyframes(frames, meta.holdIn || 0), meta.speedScale || 1);
+    VN.applyScalarKeys(start, comp, keys);
+    meta.reveal = VN.compactKeys(keys);
+    VN.writeMeta(layer, meta);
+    return VN.itemResult("updated", null, meta.instanceId, layer.name + "：已更新。", layer, meta.eventId);
+  } catch (err) {
+    try {
+      VN.restoreAnimators(layer, comp, saved);
+      layer.comment = previous;
+    } catch (rollback) {
+      return VN.itemResult("failed", "rollback_failed", meta.instanceId, layer.name + "：恢复失败。", layer, meta.eventId);
+    }
+    return VN.itemResult("failed", "write_failed", meta.instanceId, layer.name + "：写入失败，已恢复。", layer, meta.eventId);
+  }
+};
+
+VN.executeRebuild = function (lock) {
+  if (!lock || !lock.instanceId) return VN.finishOperation("rebuild", [VN.itemResult("failed", "missing_target", "", "没有可更新的文字。")]);
+  if (!VN.lockMatches(lock)) return VN.finishOperation("rebuild", [VN.itemResult("failed", "stale_context", lock.instanceId, "片段已变化，请重试。")]);
+  var active = app.project.activeItem;
+  var targets = VN.supportedSelection(active);
+  var mine = [];
+  var i;
+  for (i = 0; i < targets.length; i++) if (targets[i].meta.instanceId === lock.instanceId) mine.push(targets[i]);
+  if (!mine.length) return VN.finishOperation("rebuild", [VN.itemResult("failed", "missing_target", lock.instanceId, "没有可更新的文字。")]);
+  var items = [];
+  app.beginUndoGroup("VN 更新文字动画");
+  try {
+    for (i = 0; i < mine.length; i++) {
+      if (!VN.lockMatches(lock)) {
+        items.push(VN.itemResult("failed", "stale_context", lock.instanceId, "片段已变化，请重试。", mine[i].layer));
+        break;
+      }
+      var meta = mine[i].meta;
+      if (meta.effect === "typewriter" || meta.effect === "characterFade") items.push(VN.rebuildModern(mine[i]));
+      else items.push(VN.rebuildLegacy(mine[i]));
+    }
+  } finally {
+    app.endUndoGroup();
+  }
+  return VN.finishOperation("rebuild", items);
+};
+
+VN.executeEffect = function (lock, effect) {
+  if (effect !== "typewriter" && effect !== "characterFade") {
+    return VN.finishOperation("effect", [VN.itemResult("failed", "invalid_input", lock ? lock.instanceId : "", "未知的动画效果。")]);
+  }
+  if (!lock || !VN.lockMatches(lock)) return VN.finishOperation("effect", [VN.itemResult("failed", "stale_context", "", "片段已变化，请重试。")]);
+  var caps = VN.capabilitiesFor(lock.instanceId);
+  if (!caps.effect) return VN.finishOperation("effect", [VN.itemResult("failed", "unsupported_schema", lock.instanceId, "这个片段没有效果基准，不能切换效果。")]);
+  var targets = VN.modernTextLayers(lock.instanceId);
+  if (!targets.length) return VN.finishOperation("effect", [VN.itemResult("skipped", "missing_target", lock.instanceId, "没有可切换的文字。")]);
+  var items = [];
+  var updated = 0;
+  app.beginUndoGroup("VN 切换文字效果");
+  try {
+    var i;
+    for (i = 0; i < targets.length; i++) {
+      var target = targets[i];
+      var meta = VN.readMeta(target.layer.comment);
+      if (VN.foreignAnimatorConflict(target.layer) || VN.animationChanged(target.layer, target.comp, meta)) {
+        items.push(VN.itemResult("skipped", "manual_edit", lock.instanceId, target.layer.name + "：保留原效果。", target.layer, meta.eventId));
+        continue;
+      }
+      var time = VN.availableFrames(target.layer, target.comp, lock.instanceId);
+      if (!time.ok) {
+        items.push(VN.itemResult("skipped", time.reason, lock.instanceId, target.layer.name + "：保留原效果。", target.layer, meta.eventId));
+        continue;
+      }
+      var located = VN.eventBaseline(lock.instanceId, meta.eventId);
+      if (!located || !located.event) {
+        items.push(VN.itemResult("skipped", "unsupported_schema", lock.instanceId, target.layer.name + "：保留原效果。", target.layer, meta.eventId));
+        continue;
+      }
+      var text = VN.readBaseText(target.layer);
+      var pauses = VN.pausesForText(text, located.baseline.commaPauseFrames || 0, located.baseline.sentencePauseFrames || 0);
+      var timing = {
+        charactersPerSecond: located.event.charactersPerSecond,
+        fps: located.baseline.fps,
+        holdInFrames: located.event.animationStartFrame || 0,
+        characterFadeFrames: located.event.characterFadeFrames || 0,
+        pauses: pauses
+      };
+      var plan = VN.buildAnimationPlan(text, effect, caps.speedValue || 1, timing, time.frames);
+      if (!plan.fits) {
+        items.push(VN.itemResult("skipped", "insufficient_duration", lock.instanceId, target.layer.name + "：显示时间不够，保留原效果。", target.layer, meta.eventId));
+        continue;
+      }
+      var saved = VN.snapshotAnimators(target.layer, target.comp);
+      var previous = target.layer.comment;
+      try {
+        VN.writePlan(target.layer, target.comp, plan);
+        var basePlan = VN.buildAnimationPlan(text, effect, 1, timing, time.frames);
+        meta.effect = effect;
+        meta.preset = effect === "characterFade" ? "characterFade" : "typewriter";
+        meta.reveal = VN.compactKeys(basePlan.revealKeys);
+        meta.baseline = meta.baseline || {};
+        meta.baseline.fadeTracks = effect === "characterFade" ? basePlan.fadeTracks : [];
+        meta.current = meta.current || {};
+        meta.current.effect = effect;
+        VN.writeMeta(target.layer, meta);
+        VN.sealLayerRecord(target.layer, target.comp);
+        updated += 1;
+        items.push(VN.itemResult("updated", null, lock.instanceId, target.layer.name + "：已切换效果。", target.layer, meta.eventId));
+      } catch (err) {
+        try {
+          VN.restoreAnimators(target.layer, target.comp, saved);
+          target.layer.comment = previous;
+          items.push(VN.itemResult("failed", "write_failed", lock.instanceId, target.layer.name + "：写入失败，已恢复。", target.layer, meta.eventId));
+        } catch (rollback) {
+          items.push(VN.itemResult("failed", "rollback_failed", lock.instanceId, target.layer.name + "：恢复失败。", target.layer, meta.eventId));
+        }
+      }
+    }
+    if (updated) {
+      var folder = VN.instanceFolderMeta(lock.instanceId);
+      if (folder) {
+        folder.meta.current = folder.meta.current || {};
+        folder.meta.current.defaultEffect = effect;
+        folder.meta.current.revision = (folder.meta.current.revision || 1) + 1;
+        VN.writeMeta(folder.item, folder.meta);
+      }
+    }
+  } finally {
+    app.endUndoGroup();
+  }
+  return VN.finishOperation("effect", items, { defaultEffect: effect });
+};
+
+VN.classifyLayer = function (layer, meta) {
+  if (meta && meta.dependency === "nonsync-music") return "nonsync-music";
+  var source = null;
+  try {
+    source = layer.source;
+  } catch (ignore) {}
+  if (source && source.mainSource && source.mainSource.isStill === false) return "video";
+  try {
+    if (layer.hasAudio && (!meta || meta.dependency !== "nonsync-music")) return "sync";
+  } catch (ignoreAudio) {}
+  if (!meta) return "unclassified";
+  return "managed";
+};
+
+VN.speedPreflight = function (instanceId, speed, currentSpeed) {
+  if (!(speed >= 0.5 && speed <= 2)) return { ok: false, reason: "invalid_input", message: "速度需要在 0.5 到 2 之间。" };
+  if (Math.abs(speed - currentSpeed) < 0.001) return { ok: false, reason: "no_change", message: "速度没有变化。" };
+  var comps = VN.compsForInstance(instanceId);
+  var i;
+  for (i = 0; i < comps.length; i++) {
+    var meta = comps[i].meta;
+    if (!VN.timedLogical(meta.logicalId)) continue;
+    if (meta.logicalId !== "master") {
+      var hosts = VN.externalHosts(comps[i].comp, instanceId);
+      if (hosts.length) return { ok: false, reason: "unsupported_dependency", message: "未调整速度：" + comps[i].comp.name + " 被片段外的合成复用。" };
+    }
+    var n;
+    for (n = 1; n <= comps[i].comp.numLayers; n++) {
+      var layer = comps[i].comp.layer(n);
+      var layerMeta = VN.readMeta(layer.comment);
+      var kind = VN.classifyLayer(layer, layerMeta);
+      if (kind === "video") return { ok: false, reason: "unsupported_dependency", message: "未调整速度：" + layer.name + " 是视频，当前版本不能伸缩时间。" };
+      if (kind === "sync" && Math.abs(speed - 1) > 0.001) {
+        return { ok: false, reason: "unsupported_dependency", message: "未调整速度：此片段包含同步配音，当前版本不支持同步变速。" };
+      }
+      if (kind === "unclassified") return { ok: false, reason: "unsupported_dependency", message: "未调整速度：无法确认 " + layer.name + " 能否安全变速。" };
+      if (layerMeta && layerMeta.v === 3 && VN.timingChanged(layer, comps[i].comp, layerMeta)) {
+        return { ok: false, reason: "manual_edit", message: "未调整速度：发现手动调整的事件，片段保持原样。" };
+      }
+      if (layerMeta && layerMeta.v === 3 && VN.animationChanged(layer, comps[i].comp, layerMeta)) {
+        return { ok: false, reason: "manual_edit", message: "未调整速度：发现手动调整的事件，片段保持原样。" };
+      }
+      var remap = false;
+      try {
+        remap = !!layer.timeRemapEnabled;
+      } catch (ignore) {}
+      if (remap || Math.abs(layer.stretch - 100) > 0.01) {
+        return { ok: false, reason: "unreliable_time", message: "未调整速度：时间结构无法可靠换算，片段保持原样。" };
+      }
+    }
+  }
+  return { ok: true, reason: null, message: "" };
+};
+
+VN.externalHosts = function (comp, instanceId) {
+  var hosts = [];
+  var i;
+  for (i = 1; i <= app.project.numItems; i++) {
+    var item = app.project.item(i);
+    if (!(item instanceof CompItem)) continue;
+    var meta = VN.readMeta(item.comment);
+    if (meta && meta.instanceId === instanceId) continue;
+    var n;
+    for (n = 1; n <= item.numLayers; n++) {
+      try {
+        if (item.layer(n).source === comp) hosts.push(item);
+      } catch (ignore) {}
+    }
+  }
+  return hosts;
+};
+
+VN.mapLocalFrame = function (origin, frame, speed) {
+  return Math.round((origin + frame) / speed) - Math.round(origin / speed);
+};
+
+VN.compOrigin = function (logicalId, baseline) {
+  if (!logicalId || logicalId === "master" || logicalId === "overlay") return 0;
+  var id = logicalId;
+  if (id.indexOf("event:") === 0) id = id.substring(6);
+  if (id.indexOf("scene:") === 0) id = id.substring(6);
+  var deps = baseline.dependencies || [];
+  var i;
+  for (i = 0; i < deps.length; i++) if (deps[i].id === id) return deps[i].startFrame || 0;
+  return 0;
+};
+
+VN.mappedCompFrames = function (compMeta, baseline, speed) {
+  var duration = compMeta.baseline ? compMeta.baseline.durationFrames : null;
+  if (compMeta.logicalId === "master" || compMeta.logicalId === "overlay") duration = baseline.masterDurationFrames;
+  if (duration === null || duration === undefined) return null;
+  return VN.mapLocalFrame(VN.compOrigin(compMeta.logicalId, baseline), duration, speed);
+};
+
+VN.snapshotSpeed = function (instanceId) {
+  var shots = [];
+  var comps = VN.compsForInstance(instanceId);
+  var i;
+  for (i = 0; i < comps.length; i++) {
+    if (!VN.timedLogical(comps[i].meta.logicalId)) continue;
+    var comp = comps[i].comp;
+    var layers = [];
+    var n;
+    for (n = 1; n <= comp.numLayers; n++) {
+      var layer = comp.layer(n);
+      var opacity = null;
+      try {
+        opacity = VN.opacityProp(layer);
+      } catch (ignore) {}
+      layers.push({
+        layer: layer,
+        inPoint: layer.inPoint,
+        outPoint: layer.outPoint,
+        startTime: layer.startTime,
+        comment: layer.comment,
+        animators: VN.snapshotAnimators(layer, comp),
+        opacity: opacity ? VN.readScalarKeys(opacity, comp) : null
+      });
+    }
+    shots.push({
+      comp: comp,
+      meta: comps[i].meta,
+      duration: comp.duration,
+      workStart: comp.workAreaStart,
+      workDuration: comp.workAreaDuration,
+      comment: comp.comment,
+      layers: layers
+    });
+  }
+  var folder = VN.instanceFolderMeta(instanceId);
+  return { shots: shots, folderComment: folder ? folder.item.comment : "" };
+};
+
+VN.restoreSpeed = function (snapshot) {
+  var i;
+  for (i = 0; i < snapshot.shots.length; i++) {
+    var shot = snapshot.shots[i];
+    shot.comp.duration = shot.duration;
+    try {
+      shot.comp.workAreaStart = shot.workStart;
+      shot.comp.workAreaDuration = shot.workDuration;
+    } catch (ignoreWork) {}
+    shot.comp.comment = shot.comment;
+    var n;
+    for (n = 0; n < shot.layers.length; n++) {
+      var layerShot = shot.layers[n];
+      layerShot.layer.startTime = layerShot.startTime;
+      layerShot.layer.inPoint = layerShot.inPoint;
+      layerShot.layer.outPoint = layerShot.outPoint;
+      layerShot.layer.comment = layerShot.comment;
+      if (layerShot.opacity && layerShot.opacity.length) {
+        try {
+          VN.applyScalarKeysKeepingExpression(VN.opacityProp(layerShot.layer), shot.comp, layerShot.opacity);
+        } catch (ignoreOpacity) {}
+      }
+      VN.restoreAnimators(layerShot.layer, shot.comp, layerShot.animators);
+    }
+  }
+};
+
+VN.mappedFrameTime = function (comp, frame, shared) {
+  return VN.lookupFrame(shared, frame) * comp.frameDuration;
+};
+
+VN.executeSpeed = function (lock, speed) {
+  speed = Math.round(Number(speed) * 100) / 100;
+  if (!lock || !lock.instanceId) return VN.finishOperation("speed", [VN.itemResult("failed", "missing_target", "", "请先打开一个生成片段。")]);
+  var caps = VN.capabilitiesFor(lock.instanceId);
+  if (!caps.speed) return VN.finishOperation("speed", [VN.itemResult("failed", "unsupported_schema", lock.instanceId, "这个片段没有时间基准，不能调整速度。")]);
+  var check = VN.speedPreflight(lock.instanceId, speed, caps.speedValue);
+  if (!check.ok) return VN.finishOperation("speed", [VN.itemResult(check.reason === "no_change" ? "skipped" : "failed", check.reason, lock.instanceId, check.message)]);
+  if (!VN.lockMatches(lock)) return VN.finishOperation("speed", [VN.itemResult("failed", "stale_context", lock.instanceId, "片段已变化，请重试。")]);
+  var folder = VN.instanceFolderMeta(lock.instanceId);
+  var baseline = folder.meta.baseline;
+  var frames = [0, baseline.masterDurationFrames];
+  var e;
+  for (e = 0; e < baseline.events.length; e++) {
+    frames.push(baseline.events[e].startFrame);
+    frames.push(baseline.events[e].startFrame + baseline.events[e].durationFrames);
+  }
+  for (e = 0; e < baseline.dependencies.length; e++) {
+    frames.push(baseline.dependencies[e].startFrame);
+    frames.push(baseline.dependencies[e].startFrame + baseline.dependencies[e].durationFrames);
+  }
+  var shared = VN.mapBaselineFrames(frames, speed);
+  var masterFrames = VN.lookupFrame(shared, baseline.masterDurationFrames) - VN.lookupFrame(shared, 0);
+  var snapshot = VN.snapshotSpeed(lock.instanceId);
+  var external = [];
+  app.beginUndoGroup("VN 调整播放速度");
+  try {
+    var comps = VN.compsForInstance(lock.instanceId);
+    var i;
+    for (i = 0; i < comps.length; i++) {
+      var compMeta = comps[i].meta;
+      if (!VN.timedLogical(compMeta.logicalId)) continue;
+      var comp = comps[i].comp;
+      var baseDuration = VN.mappedCompFrames(compMeta, baseline, speed);
+        if (baseDuration !== null) {
+        var nextDuration = baseDuration * comp.frameDuration;
+        var covered = comp.workAreaStart <= comp.frameDuration && Math.abs(comp.workAreaStart + comp.workAreaDuration - comp.duration) <= comp.frameDuration * 2;
+        if (nextDuration < comp.duration && !covered) {
+          var room = nextDuration - comp.workAreaStart;
+          if (room < comp.frameDuration) room = comp.frameDuration;
+          comp.workAreaDuration = room;
+        }
+        comp.duration = Math.max(comp.frameDuration, nextDuration);
+        if (covered) {
+          comp.workAreaStart = 0;
+          comp.workAreaDuration = comp.duration;
+        }
+      }
+      if (compMeta.logicalId === "master") external = VN.externalHosts(comp, lock.instanceId);
+      var n;
+      for (n = 1; n <= comp.numLayers; n++) {
+        var layer = comp.layer(n);
+        var layerMeta = VN.readMeta(layer.comment);
+        if (!layerMeta || !layerMeta.baseline) continue;
+        VN.applyLayerSpeed(layer, comp, layerMeta, speed, VN.compOrigin(compMeta.logicalId, baseline));
+      }
+    }
+    folder.meta.current = folder.meta.current || {};
+    folder.meta.current.speed = speed;
+    folder.meta.current.revision = (folder.meta.current.revision || 1) + 1;
+    VN.writeMeta(folder.item, folder.meta);
+    var master = VN.masterCompFor(lock.instanceId);
+    if (!master || Math.abs(Math.round(master.duration / master.frameDuration) - masterFrames) > 1) {
+      throw new Error("写入后的长度和计划不一致");
+    }
+  } catch (err) {
+    try {
+      VN.restoreSpeed(snapshot);
+      if (folder) folder.item.comment = snapshot.folderComment;
+    } catch (rollback) {
+      try { app.endUndoGroup(); } catch (ignore) {}
+      return VN.finishOperation("speed", [VN.itemResult("failed", "rollback_failed", lock.instanceId, "速度调整失败，而且未能恢复。" + rollback.toString())]);
+    }
+    try { app.endUndoGroup(); } catch (ignoreEnd) {}
+    return VN.finishOperation("speed", [VN.itemResult("failed", "write_failed", lock.instanceId, "未调整速度：写入失败，片段已恢复。" + err.toString())]);
+  }
+  app.endUndoGroup();
+  var message = "速度已调整为 " + speed + " 倍。";
+  if (external.length) message += "片段已延长；外部时间轴中的引用可能需要延长出点。";
+  var result = VN.finishOperation("speed", [VN.itemResult("updated", null, lock.instanceId, message)], { appliedSpeed: speed, durationFrames: masterFrames });
+  result.message = message;
+  return result;
+};
+
+VN.applyLayerSpeed = function (layer, comp, meta, speed, origin) {
+  var base = meta.baseline;
+  if (base.outFrame === null || base.outFrame === undefined) {
+    if (!base.inFrame) layer.outPoint = comp.duration;
+  } else {
+    var startFrame = base.startFrame === undefined || base.startFrame === null ? base.inFrame : base.startFrame;
+    layer.startTime = VN.mapLocalFrame(origin, startFrame, speed) * comp.frameDuration;
+    layer.inPoint = VN.mapLocalFrame(origin, base.inFrame, speed) * comp.frameDuration;
+    layer.outPoint = VN.mapLocalFrame(origin, base.outFrame, speed) * comp.frameDuration;
+  }
+  if (base.opacity && base.opacity.length) {
+    var opacity = VN.opacityProp(layer);
+    VN.applyScalarKeysKeepingExpression(opacity, comp, VN.scaleStoredKeys(base.opacity, speed, origin));
+  }
+  if (base.position && base.position.length) VN.applyStoredPosition(layer, comp, base.position, speed, origin);
+  if (meta.effect === "characterFade" && base.fadeTracks && base.fadeTracks.length) {
+    var faded = VN.buildStoredFade(base.fadeTracks, speed, origin);
+    VN.removeManagedAnimators(layer);
+    var i;
+    for (i = 0; i < faded.length; i++) {
+      VN.installFadeAnimator(layer, comp, {
+        name: "VN_FADE_" + i,
+        aeIndex: faded[i].aeIndex,
+        aeLength: faded[i].aeLength,
+        opacityKeys: faded[i].keys
+      });
+    }
+  } else if (base.reveal && base.reveal.length && (meta.effect === "typewriter" || meta.preset === "typewriter" || meta.preset === "lines")) {
+    var startProp = VN.findRevealStart(layer);
+    var keys = VN.scaleStoredKeys(base.reveal, speed, origin);
+    if (!startProp) VN.installRevealKeys(layer, comp, keys);
+    else VN.applyScalarKeys(startProp, comp, keys);
+  }
+  meta.current = meta.current || {};
+  meta.current.speed = speed;
+  VN.writeMeta(layer, meta);
+  VN.sealLayerRecord(layer, comp);
+};
+
+VN.applyStoredPosition = function (layer, comp, compact, speed, origin) {
+  var position = VN.requireProp(VN.requireProp(layer, "ADBE Transform Group"), "ADBE Position");
+  if (position.expression) position.expression = "";
+  VN.clearKeys(position);
+  var i;
+  for (i = 0; i < compact.length; i++) {
+    position.setValueAtTime(VN.mapLocalFrame(origin, compact[i][0], speed) * comp.frameDuration, [compact[i][1], compact[i][2]]);
+  }
+  for (i = 0; i < compact.length; i++) {
+    var interp = compact[i][3] === "hold" ? KeyframeInterpolationType.HOLD : KeyframeInterpolationType.LINEAR;
+    position.setInterpolationTypeAtKey(i + 1, interp, interp);
+  }
+};
+
+VN.scaleStoredKeys = function (compact, speed, origin) {
+  var keys = [];
+  var i;
+  for (i = 0; i < compact.length; i++) {
+    keys.push({ frame: VN.mapLocalFrame(origin || 0, compact[i][0], speed), value: compact[i][1], interpolation: compact[i][2] || "hold" });
+  }
+  return keys;
+};
+
+VN.buildStoredFade = function (tracks, speed, origin) {
+  var out = [];
+  var i;
+  var n;
+  for (i = 0; i < tracks.length; i++) {
+    var keys = [];
+    for (n = 0; n < tracks[i].keys.length; n++) {
+      keys.push({
+        frame: VN.mapLocalFrame(origin || 0, tracks[i].keys[n].frame, speed),
+        value: tracks[i].keys[n].value,
+        interpolation: tracks[i].keys[n].interpolation || "linear"
+      });
+    }
+    out.push({ aeIndex: tracks[i].aeIndex, aeLength: tracks[i].aeLength, keys: keys });
+  }
+  return out;
+};
+
+VN.readStyleDocument = function (layer) {
+  var source = VN.requireProp(VN.requireProp(layer, "ADBE Text Properties"), "ADBE Text Document");
+  var value = source.value;
+  return {
+    source: source,
+    font: value.font,
+    fontSize: value.fontSize,
+    autoLeading: !!value.autoLeading,
+    leading: value.leading,
+    fillColor: [value.fillColor[0], value.fillColor[1], value.fillColor[2]]
+  };
+};
+
+VN.applyStylePatch = function (lock, layers, patch) {
+  if (!lock || !VN.lockMatches(lock)) return VN.finishOperation("style", [VN.itemResult("failed", "stale_context", lock ? lock.instanceId : "", "片段已变化，请重试。")]);
+  if (!layers.length) return VN.finishOperation("style", [VN.itemResult("failed", "missing_target", lock.instanceId, "找不到要修改的样式层。")]);
+  if (patch.fontSize !== undefined && !(patch.fontSize > 0)) {
+    return VN.finishOperation("style", [VN.itemResult("failed", "invalid_input", lock.instanceId, "字号必须大于 0。")]);
+  }
+  if (patch.leading && patch.leading.mode === "explicit" && !(patch.leading.value > 0)) {
+    return VN.finishOperation("style", [VN.itemResult("failed", "invalid_input", lock.instanceId, "行距必须大于 0。")]);
+  }
+  var snapshots = [];
+  var i;
+  for (i = 0; i < layers.length; i++) {
+    if (!layers[i] || !(layers[i] instanceof TextLayer)) {
+      return VN.finishOperation("style", [VN.itemResult("failed", "missing_target", lock.instanceId, "样式层已经不存在。")]);
+    }
+    snapshots.push(VN.readStyleDocument(layers[i]));
+  }
+  app.beginUndoGroup("VN 修改文字样式");
+  try {
+    for (i = 0; i < layers.length; i++) {
+      var prop = snapshots[i].source;
+      var doc = prop.value;
+      if (patch.font !== undefined) doc.font = patch.font;
+      if (patch.fontSize !== undefined) doc.fontSize = patch.fontSize;
+      if (patch.leading) {
+        if (patch.leading.mode === "auto") doc.autoLeading = true;
+        else {
+          doc.autoLeading = false;
+          doc.leading = patch.leading.value;
+        }
+      }
+      if (patch.fillColor) {
+        doc.applyFill = true;
+        doc.fillColor = [patch.fillColor[0], patch.fillColor[1], patch.fillColor[2]];
+      }
+      prop.setValue(doc);
+    }
+  } catch (err) {
+    try {
+      for (i = 0; i < snapshots.length; i++) {
+        var current = snapshots[i].source.value;
+        current.font = snapshots[i].font;
+        current.fontSize = snapshots[i].fontSize;
+        current.autoLeading = snapshots[i].autoLeading;
+        current.leading = snapshots[i].leading;
+        current.applyFill = true;
+        current.fillColor = snapshots[i].fillColor;
+        snapshots[i].source.setValue(current);
+      }
+    } catch (rollback) {
+      try { app.endUndoGroup(); } catch (ignore) {}
+      return VN.finishOperation("style", [VN.itemResult("failed", "rollback_failed", lock.instanceId, "样式恢复失败。" + rollback.toString())]);
+    }
+    try { app.endUndoGroup(); } catch (ignoreEnd) {}
+    return VN.finishOperation("style", [VN.itemResult("failed", "write_failed", lock.instanceId, "样式没有写入，已恢复。" + err.toString())]);
+  }
+  app.endUndoGroup();
+  return VN.finishOperation("style", [VN.itemResult("updated", null, lock.instanceId, "样式已更新。")]);
+};
+
+var VN = VN || {};
+
+VN.compByLogical = function (instanceId, logicalId) {
+  var i;
+  for (i = 1; i <= app.project.numItems; i++) {
+    var item = app.project.item(i);
+    if (!(item instanceof CompItem)) continue;
+    var meta = VN.readMeta(item.comment);
+    if (meta && meta.instanceId === instanceId && meta.logicalId === logicalId) return item;
+  }
+  return null;
+};
+
+VN.styleTargets = function (instanceId, scope) {
+  var logicals = ["style:dialogue", "style:narration", "style:option"];
+  if (scope === "dialogue") logicals = ["style:dialogue"];
+  if (scope === "narration") logicals = ["style:narration"];
+  if (scope === "option") logicals = ["style:option"];
+  var layers = [];
+  var i;
+  for (i = 0; i < logicals.length; i++) {
+    var comp = VN.compByLogical(instanceId, logicals[i]);
+    if (!comp) continue;
+    var n;
+    for (n = 1; n <= comp.numLayers; n++) {
+      if (comp.layer(n).name === "STYLE") layers.push(comp.layer(n));
+    }
+  }
+  return layers;
+};
+
+VN.scopeInfluence = function (scope) {
+  if (scope === "dialogue") return "影响此片段中的对白";
+  if (scope === "narration") return "影响此片段中的旁白";
+  if (scope === "option") return "影响此片段中的选项";
+  return "影响此片段中的全部文字";
+};
+
+VN.colorHex = function (color) {
+  function part(value) {
+    var num = Math.round(Math.max(0, Math.min(1, value)) * 255);
+    var hex = num.toString(16);
+    return hex.length < 2 ? "0" + hex : hex;
+  }
+  return "#" + part(color[0]) + part(color[1]) + part(color[2]);
+};
+
+VN.parseHexColor = function (text) {
+  var value = String(text || "").replace(/^\s+|\s+$/g, "");
+  if (value.charAt(0) === "#") value = value.substring(1);
+  if (value.length !== 6) return null;
+  var i;
+  for (i = 0; i < 6; i++) {
+    var code = value.charCodeAt(i);
+    var ok = (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102);
+    if (!ok) return null;
+  }
+  return [parseInt(value.substring(0, 2), 16) / 255, parseInt(value.substring(2, 4), 16) / 255, parseInt(value.substring(4, 6), 16) / 255];
+};
+
+VN.revealStyleLayer = function (instanceId, scope) {
+  var logical = "style:dialogue";
+  if (scope === "narration") logical = "style:narration";
+  if (scope === "option") logical = "style:option";
+  var comp = VN.compByLogical(instanceId, logical);
+  if (!comp) return false;
+  comp.openInViewer();
+  var i;
+  for (i = 1; i <= comp.numLayers; i++) comp.layer(i).selected = comp.layer(i).name === "STYLE";
+  return true;
+};
+
+VN.fontNames = function () {
+  var names = [];
+  try {
+    if (!(app.fonts && app.fonts.allFonts)) return names;
+    var fonts = app.fonts.allFonts;
+    var i;
+    for (i = 0; i < fonts.length; i++) {
+      var name = fonts[i].postScriptName || fonts[i].name;
+      if (name) names.push(String(name));
+    }
+  } catch (ignore) {}
+  return names;
+};
+
+VN.openStyleEditor = function (instanceId) {
+  var caps = VN.capabilitiesFor(instanceId);
+  if (caps.style !== "editor") {
+    var legacy = VN.openLogicalComp(instanceId, "global:control");
+    return { ok: legacy.ok, message: legacy.ok ? "已打开原有样式控制" : legacy.message };
+  }
+  var lock = VN.captureLock(instanceId);
+  var folder = VN.instanceFolderMeta(instanceId);
+  var display = folder && folder.meta.displayName ? folder.meta.displayName : instanceId;
+  var win = new Window("dialog", "文字样式");
+  win.orientation = "column";
+  win.alignChildren = ["fill", "top"];
+  win.margins = 12;
+  win.spacing = 8;
+  win.preferredSize.width = 340;
+  win.add("statictext", undefined, "修改：" + display);
+  var influence = win.add("statictext", undefined, "影响此片段中的全部文字", { multiline: true });
+  influence.preferredSize.height = 32;
+  var scopeList = win.add("dropdownlist", undefined, ["全部文字", "对白", "旁白", "选项"]);
+  scopeList.selection = 0;
+  var fontLabel = win.add("statictext", undefined, "字体");
+  var fontList = win.add("dropdownlist", undefined, ["当前字体"]);
+  var fontStatic = win.add("statictext", undefined, "", { multiline: true });
+  var fontButton = win.add("button", undefined, "在 AE 字符面板修改字体");
+  var sizeLabel = win.add("statictext", undefined, "字号");
+  var sizeText = win.add("edittext", undefined, "");
+  var leadingLabel = win.add("statictext", undefined, "行距");
+  var leadingMode = win.add("dropdownlist", undefined, ["自动行距", "指定行距"]);
+  var leadingText = win.add("edittext", undefined, "");
+  var colorLabel = win.add("statictext", undefined, "颜色");
+  var colorText = win.add("edittext", undefined, "");
+  var row = win.add("group");
+  row.orientation = "row";
+  row.alignChildren = ["fill", "center"];
+  var applyButton = row.add("button", undefined, "应用");
+  var closeButton = row.add("button", undefined, "关闭");
+  var dirty = { font: false, fontSize: false, leading: false, color: false };
+  var filling = false;
+  var fonts = VN.fontNames();
+  var canListFonts = fonts.length > 0;
+  fontList.visible = canListFonts;
+  fontStatic.visible = !canListFonts;
+
+  function scopeName() {
+    if (!scopeList.selection || scopeList.selection.index === 0) return "all";
+    if (scopeList.selection.index === 1) return "dialogue";
+    if (scopeList.selection.index === 2) return "narration";
+    return "option";
+  }
+
+  function hasDirty() {
+    return dirty.font || dirty.fontSize || dirty.leading || dirty.color;
+  }
+
+  function fill() {
+    filling = true;
+    dirty = { font: false, fontSize: false, leading: false, color: false };
+    var scope = scopeName();
+    influence.text = VN.scopeInfluence(scope);
+    var layers = VN.styleTargets(lock.instanceId, scope);
+    if (!layers.length) {
+      sizeText.text = "";
+      colorText.text = "";
+      filling = false;
+      return;
+    }
+    var docs = [];
+    var i;
+    for (i = 0; i < layers.length; i++) docs.push(VN.readStyleDocument(layers[i]));
+    var fontValue = docs[0].font;
+    var sizeValue = String(docs[0].fontSize);
+    var leadMode = docs[0].autoLeading ? "自动行距" : "指定行距";
+    var leadValue = String(docs[0].leading);
+    var colorValue = VN.colorHex(docs[0].fillColor);
+    for (i = 1; i < docs.length; i++) {
+      if (docs[i].font !== docs[0].font) fontValue = "多种值";
+      if (String(docs[i].fontSize) !== String(docs[0].fontSize)) sizeValue = "多种值";
+      var mode = docs[i].autoLeading ? "自动行距" : "指定行距";
+      if (mode !== leadMode || String(docs[i].leading) !== String(docs[0].leading)) {
+        leadMode = "多种值";
+        leadValue = "多种值";
+      }
+      if (VN.colorHex(docs[i].fillColor) !== colorValue) colorValue = "多种值";
+    }
+    if (canListFonts) {
+      fontList.removeAll();
+      if (fontValue === "多种值") fontList.add("item", "多种值");
+      for (i = 0; i < fonts.length; i++) fontList.add("item", fonts[i]);
+      var picked = 0;
+      for (i = 0; i < fontList.items.length; i++) if (fontList.items[i].text === fontValue) picked = i;
+      fontList.selection = picked;
+    } else {
+      fontStatic.text = fontValue;
+    }
+    sizeText.text = sizeValue;
+    if (leadMode === "多种值") {
+      leadingMode.selection = 0;
+      leadingText.text = "多种值";
+    } else {
+      leadingMode.selection = leadMode === "自动行距" ? 0 : 1;
+      leadingText.text = docs[0].autoLeading ? "" : leadValue;
+    }
+    colorText.text = colorValue;
+    filling = false;
+  }
+
+  function askSwitch() {
+    var ask = new Window("dialog", "未应用的修改");
+    ask.orientation = "column";
+    ask.alignChildren = ["fill", "top"];
+    ask.add("statictext", undefined, "切换作用对象前，当前修改还没有应用。", { multiline: true });
+    var buttons = ask.add("group");
+    var apply = buttons.add("button", undefined, "应用后切换");
+    var drop = buttons.add("button", undefined, "放弃修改");
+    var stay = buttons.add("button", undefined, "继续编辑");
+    var choice = "stay";
+    apply.onClick = function () { choice = "apply"; ask.close(); };
+    drop.onClick = function () { choice = "drop"; ask.close(); };
+    stay.onClick = function () { choice = "stay"; ask.close(); };
+    ask.show();
+    return choice;
+  }
+
+  var previousScope = 0;
+  scopeList.onChange = function () {
+    if (filling) return;
+    if (scopeList.selection && scopeList.selection.index === previousScope) return;
+    if (hasDirty()) {
+      var choice = askSwitch();
+      if (choice === "stay") {
+        filling = true;
+        scopeList.selection = previousScope;
+        filling = false;
+        return;
+      }
+      if (choice === "apply") {
+        var applied = commit();
+        if (!applied) {
+          filling = true;
+          scopeList.selection = previousScope;
+          filling = false;
+          return;
+        }
+      }
+    }
+    previousScope = scopeList.selection ? scopeList.selection.index : 0;
+    fill();
+  };
+  fontList.onChange = function () { if (!filling) dirty.font = true; };
+  sizeText.onChanging = function () { if (!filling) dirty.fontSize = true; };
+  leadingMode.onChange = function () { if (!filling) dirty.leading = true; };
+  leadingText.onChanging = function () { if (!filling) dirty.leading = true; };
+  colorText.onChanging = function () { if (!filling) dirty.color = true; };
+  fontButton.onClick = function () {
+    var scope = scopeName();
+    if (scope === "all") {
+      alert("每一类文字使用自己的样式层。接下来定位对白样式层；旁白和选项需要分别打开。");
+      VN.revealStyleLayer(lock.instanceId, "dialogue");
+      return;
+    }
+    VN.revealStyleLayer(lock.instanceId, scope);
+  };
+
+  function commit() {
+    if (!VN.lockMatches(lock)) {
+      alert("片段已变化，请关闭窗口后重试。");
+      return false;
+    }
+    var patch = {};
+    if (dirty.font && canListFonts && fontList.selection && fontList.selection.text !== "多种值") patch.font = fontList.selection.text;
+    if (dirty.font && canListFonts && fontList.selection && fontList.selection.text === "多种值") {
+      alert("字体仍是多种值，不能写回。");
+      return false;
+    }
+    if (dirty.fontSize) {
+      if (sizeText.text === "多种值") {
+        alert("字号仍是多种值，不能写回。");
+        return false;
+      }
+      var size = parseFloat(sizeText.text);
+      if (!(size > 0)) {
+        alert("字号必须大于 0。");
+        return false;
+      }
+      patch.fontSize = size;
+    }
+    if (dirty.leading) {
+      if (leadingText.text === "多种值") {
+        alert("行距仍是多种值，不能写回。");
+        return false;
+      }
+      if (leadingMode.selection && leadingMode.selection.index === 0) patch.leading = { mode: "auto" };
+      else {
+        var leading = parseFloat(leadingText.text);
+        if (!(leading > 0)) {
+          alert("行距必须大于 0。");
+          return false;
+        }
+        patch.leading = { mode: "explicit", value: leading };
+      }
+    }
+    if (dirty.color) {
+      if (colorText.text === "多种值") {
+        alert("颜色仍是多种值，不能写回。");
+        return false;
+      }
+      var color = VN.parseHexColor(colorText.text);
+      if (!color) {
+        alert("颜色请使用 #RRGGBB。");
+        return false;
+      }
+      patch.fillColor = color;
+    }
+    if (!patch.font && patch.fontSize === undefined && !patch.leading && !patch.fillColor) return true;
+    var layers = VN.styleTargets(lock.instanceId, scopeName());
+    var result = VN.applyStylePatch(lock, layers, patch);
+    if (result.status !== "updated") {
+      alert(result.message);
+      return false;
+    }
+    lock = VN.captureLock(instanceId);
+    dirty = { font: false, fontSize: false, leading: false, color: false };
+    return true;
+  }
+
+  applyButton.onClick = function () {
+    if (commit()) fill();
+  };
+  closeButton.onClick = function () {
+    if (hasDirty()) {
+      var choice = askSwitch();
+      if (choice === "stay") return;
+      if (choice === "apply" && !commit()) return;
+    }
+    win.close();
+  };
+  fill();
+  win.show();
+  return { ok: true, message: "样式窗口已关闭" };
 };
 
 var VN = VN || {};
@@ -2030,7 +3730,7 @@ VN.runImport = function (options) {
     VN.ensureVersion();
     if (typeof JSON === "undefined") throw new Error("这个 After Effects 的脚本环境无法解析 JSON。");
     var compiled = options.compiled;
-    if (!compiled || compiled.schemaVersion !== 2) throw new Error("这份作品包的数据结构不是受支持的版本。");
+    if (!compiled || (compiled.schemaVersion !== 2 && compiled.schemaVersion !== 3)) throw new Error("这份作品包的数据结构不是受支持的版本。");
     var empty = app.project.numItems === 0;
     report.mode = empty ? "create" : "append";
     if (!empty) VN.ensureExpressionEngineCompatible();
@@ -2136,145 +3836,73 @@ VN.buildPanel = function (thisObj) {
   }
   win.orientation = "column";
   win.alignChildren = ["fill", "top"];
-  win.spacing = 6;
+  win.spacing = 8;
   win.margins = 10;
+  win.preferredSize = [340, 480];
 
-  var header = win.add("group");
-  header.orientation = "row";
-  header.alignChildren = ["left", "center"];
-  header.add("statictext", undefined, "文字冒险");
-  var moreButton = header.add("button", undefined, "更多");
-  moreButton.alignment = ["right", "center"];
-  moreButton.preferredSize.width = 64;
-
-  var menu = win.add("group");
-  menu.orientation = "column";
-  menu.alignChildren = ["fill", "top"];
-  menu.spacing = 2;
-  var speedMenu = menu.add("button", undefined, "批量调整节奏…");
-  var presetMenu = menu.add("button", undefined, "更换文字动画…");
-  var unlinkMenu = menu.add("button", undefined, "独立编辑样式…");
-  var checkMenu = menu.add("button", undefined, "检查当前片段");
-  var infoMenu = menu.add("button", undefined, "作品包详情");
-  var assetsMenu = menu.add("button", undefined, "打开素材目录");
-
-  var packageHeading = win.add("statictext", undefined, "作品包");
-  var pickRow = win.add("group");
-  pickRow.orientation = "row";
-  pickRow.alignChildren = ["fill", "center"];
-  var chooseButton = pickRow.add("button", undefined, "选择作品包…");
-  chooseButton.alignment = ["fill", "center"];
-  var recent = pickRow.add("dropdownlist", undefined, ["最近使用"]);
-  recent.selection = 0;
-  recent.preferredSize.width = 120;
-
-  var emptyText = win.add("statictext", undefined, "选择一个作品包开始", { multiline: true });
-  emptyText.preferredSize.height = 32;
-
-  var summary = win.add("group");
-  summary.orientation = "column";
-  summary.alignChildren = ["fill", "top"];
-  summary.spacing = 2;
-  var summaryName = summary.add("statictext", undefined, "", { multiline: true });
-  summaryName.preferredSize.height = 32;
-  var summaryMeta = summary.add("statictext", undefined, "", { multiline: true });
+  var clipBox = win.add("panel", undefined, "片段");
+  clipBox.orientation = "column";
+  clipBox.alignChildren = ["fill", "top"];
+  clipBox.margins = 8;
+  var chooseButton = clipBox.add("button", undefined, "选择作品包");
+  var summaryName = clipBox.add("statictext", undefined, "选择一个作品包开始", { multiline: true });
+  summaryName.preferredSize.height = 36;
+  var summaryMeta = clipBox.add("statictext", undefined, " ", { multiline: true });
   summaryMeta.preferredSize.height = 32;
-  var summaryHealth = summary.add("statictext", undefined, "", { multiline: true });
-  summaryHealth.preferredSize.height = 28;
+  var instancePick = clipBox.add("dropdownlist", undefined, ["已有片段"]);
+  var primaryButton = clipBox.add("button", undefined, "导入片段");
+
+  var playBox = win.add("panel", undefined, "文字样式与播放");
+  playBox.orientation = "column";
+  playBox.alignChildren = ["fill", "top"];
+  playBox.margins = 8;
+  var playName = playBox.add("statictext", undefined, " ", { multiline: true });
+  playName.preferredSize.height = 32;
+  var playDuration = playBox.add("statictext", undefined, " ", { multiline: true });
+  playDuration.preferredSize.height = 32;
+  var styleButton = playBox.add("button", undefined, "修改文字样式");
+  var effectList = playBox.add("dropdownlist", undefined, ["打字机", "透明度逐字显示"]);
+  effectList.selection = 0;
+  var effectButton = playBox.add("button", undefined, "应用效果");
+  var effectNote = playBox.add("statictext", undefined, " ", { multiline: true });
+  effectNote.preferredSize.height = 32;
+  var speedLabel = playBox.add("statictext", undefined, "播放速度");
+  var speedSlider = playBox.add("slider", undefined, 1, 0.5, 2);
+  var speedValue = playBox.add("edittext", undefined, "1");
+  var speedPreview = playBox.add("statictext", undefined, " ", { multiline: true });
+  speedPreview.preferredSize.height = 28;
+
+  var textBox = win.add("panel", undefined, "文字动画");
+  textBox.orientation = "column";
+  textBox.alignChildren = ["fill", "top"];
+  textBox.margins = 8;
+  var textCount = textBox.add("statictext", undefined, " ", { multiline: true });
+  var rebuildButton = textBox.add("button", undefined, "更新文字动画");
 
   var errorBox = win.add("group");
   errorBox.orientation = "column";
   errorBox.alignChildren = ["fill", "top"];
-  var errorTitle = errorBox.add("statictext", undefined, "", { multiline: true });
+  var errorTitle = errorBox.add("statictext", undefined, " ", { multiline: true });
   errorTitle.preferredSize.height = 36;
-  var errorHint = errorBox.add("statictext", undefined, "", { multiline: true });
-  errorHint.preferredSize.height = 32;
   var errorRow = errorBox.add("group");
-  errorRow.orientation = "row";
-  var recheckButton = errorRow.add("button", undefined, "重新检查");
-  var copyButton = errorRow.add("button", undefined, "复制错误详情");
+  var copyButton = errorRow.add("button", undefined, "复制错误");
+  var assetsButton = errorRow.add("button", undefined, "打开素材目录");
 
-  var destinationLabel = win.add("statictext", undefined, "导入位置");
-  var destination = win.add("dropdownlist", undefined, ["仅加入项目面板", "插入当前合成"]);
-  destination.selection = 0;
-  var targetText = win.add("statictext", undefined, "导入后可自行拖入时间轴", { multiline: true });
-  targetText.preferredSize.height = 32;
-  var importButton = win.add("button", undefined, "导入片段");
-  var openLastButton = win.add("button", undefined, "打开主合成");
-
-  var duplicateBox = win.add("group");
-  duplicateBox.orientation = "column";
-  duplicateBox.alignChildren = ["fill", "top"];
-  duplicateBox.add("statictext", undefined, "本工程已导入此版本");
-  var duplicateRow = duplicateBox.add("group");
-  duplicateRow.orientation = "row";
-  duplicateRow.alignChildren = ["fill", "center"];
-  var openExistingButton = duplicateRow.add("button", undefined, "打开已导入片段");
-  var copyImportButton = duplicateRow.add("button", undefined, "再导入副本");
-
-  var currentBox = win.add("panel", undefined, "当前片段");
-  currentBox.orientation = "column";
-  currentBox.alignChildren = ["fill", "top"];
-  currentBox.alignment = ["fill", "top"];
-  currentBox.margins = 8;
-  var currentPrompt = currentBox.add("statictext", undefined, "请选择一个生成的片段", { multiline: true });
-  var currentName = currentBox.add("statictext", undefined, "", { multiline: true });
-  currentName.preferredSize.height = 28;
-  var currentRow = currentBox.add("group");
-  currentRow.orientation = "row";
-  currentRow.alignChildren = ["fill", "center"];
-  var openMasterButton = currentRow.add("button", undefined, "打开主合成");
-  var styleButton = currentRow.add("button", undefined, "全局样式");
-
-  var textBox = win.add("panel", undefined, "文字工具");
-  textBox.orientation = "column";
-  textBox.alignChildren = ["fill", "top"];
-  textBox.margins = 8;
-  var textCount = textBox.add("statictext", undefined, "", { multiline: true });
-  var textPreview = textBox.add("statictext", undefined, "", { multiline: true });
-  textPreview.preferredSize.height = 32;
-  var rebuildButton = textBox.add("button", undefined, "按新文案重建动画");
-  textBox.add("statictext", undefined, "手动调整过的动画会跳过");
-
-  var extraBox = win.add("panel", undefined, "批量操作");
-  extraBox.orientation = "column";
-  extraBox.alignChildren = ["fill", "top"];
-  extraBox.margins = 8;
-  var extraTitle = extraBox.add("statictext", undefined, "批量调整节奏");
-  extraBox.add("statictext", undefined, "处理范围");
-  var scopeList = extraBox.add("dropdownlist", undefined, ["选中文字"]);
-  scopeList.selection = 0;
-  var speedLabel = extraBox.add("statictext", undefined, "速度倍率");
-  var speedText = extraBox.add("edittext", undefined, "1");
-  var keepManual = extraBox.add("checkbox", undefined, "按现有关键帧缩放");
-  var presetLabel = extraBox.add("statictext", undefined, "动画预设");
-  var presetList = extraBox.add("dropdownlist", undefined, ["打字机", "逐行出现", "整段淡入"]);
-  presetList.selection = 0;
-  var extraRow = extraBox.add("group");
-  extraRow.orientation = "row";
-  var extraApply = extraRow.add("button", undefined, "应用");
-  var extraClose = extraRow.add("button", undefined, "关闭");
-
+  var statusText = win.add("statictext", undefined, "选择一个作品包开始", { multiline: true });
+  statusText.preferredSize.height = 36;
   var detailsBox = win.add("edittext", undefined, "", { multiline: true });
   detailsBox.preferredSize.height = 72;
 
-  var footer = win.add("group");
-  footer.orientation = "row";
-  footer.alignChildren = ["fill", "center"];
-  var statusText = footer.add("statictext", undefined, "选择一个作品包开始", { multiline: true });
-  statusText.alignment = ["fill", "center"];
-  statusText.preferredSize.height = 28;
-
   var ui = {
-    state: "empty",
     inspection: null,
     manifestFile: null,
     existing: [],
-    lastResult: null,
     context: null,
-    contextSignature: "",
-    extraMode: "",
-    menuOpen: false
+    signature: "",
+    busy: false,
+    fillingSpeed: false,
+    speedLock: null,
+    dragging: false
   };
   VN._panel = win;
 
@@ -2285,24 +3913,18 @@ VN.buildPanel = function (thisObj) {
   }
 
   function layoutNow() {
-    var i;
     try {
+      var i;
       for (i = 0; i < win.children.length; i++) pinTop(win.children[i]);
       win.layout.layout(true);
     } catch (ignoreLayout) {}
-    try {
-      win.update();
-    } catch (ignoreUpdate) {}
   }
 
   function setShown(item, shown) {
     item.visible = !!shown;
     try {
-      if (shown) {
-        item.maximumSize = [4000, 4000];
-        if (item._vnHeight) item.preferredSize = [item.preferredSize.width > 20 ? item.preferredSize.width : 240, item._vnHeight];
-      } else {
-        if (!item._vnHeight && item.preferredSize && item.preferredSize.height > 8) item._vnHeight = item.preferredSize.height;
+      if (shown) item.maximumSize = [4000, 4000];
+      else {
         item.minimumSize = [0, 0];
         item.maximumSize = [0, 0];
       }
@@ -2310,245 +3932,146 @@ VN.buildPanel = function (thisObj) {
   }
 
   function setLabel(field, text) {
-    var value = text ? String(text) : " ";
-    field.text = value;
-    try {
-      field.characters = value.length < 12 ? 12 : value.length;
-    } catch (ignoreCharacters) {}
+    field.text = text ? String(text) : " ";
   }
 
-  function setStatus(text) {
+  function setStatus(text, details) {
     setLabel(statusText, text);
-    try {
-      win.update();
-    } catch (ignoreUpdate) {}
+    detailsBox.text = details || "";
+    setShown(detailsBox, !!details);
+    layoutNow();
   }
 
-  function showDetails(text, shown) {
-    detailsBox.text = text || "";
-    setShown(detailsBox, !!shown && !!text);
+  function speedNumber(value) {
+    var number = Math.round(Number(value) * 100) / 100;
+    if (!(number >= 0.5 && number <= 2)) return null;
+    return number;
   }
 
-  function shortText(value) {
-    var text = String(value || "").replace(/\r|\n/g, " ");
-    if (text.length > 28) text = text.substring(0, 28) + "…";
-    return text ? "“" + text + "”" : "";
+  function predictedText(instanceId, speed) {
+    var folder = VN.instanceFolderMeta(instanceId);
+    if (!folder || !folder.meta.baseline) return "";
+    var frames = Math.round(folder.meta.baseline.masterDurationFrames / speed);
+    return "预计：" + VN.formatDuration(frames, folder.meta.baseline.fps);
   }
 
-  function fillRecent() {
-    VN._fillingRecent = true;
-    recent.removeAll();
-    recent.add("item", "最近使用");
-    ui.recentItems = VN.readRecentPackages();
+  function currentText(instanceId) {
+    var caps = VN.capabilitiesFor(instanceId);
+    var master = VN.masterCompFor(instanceId);
+    if (!master) return "当前片段";
+    var frames = Math.round(master.duration / master.frameDuration);
+    return "当前片段：" + VN.formatDuration(frames, master.frameRate) + " · " + caps.speedValue + " 倍速";
+  }
+
+  function fillInstances() {
+    instancePick.removeAll();
     var i;
-    for (i = 0; i < ui.recentItems.length; i++) {
-      var item = ui.recentItems[i];
-      var label = item.displayName || "作品包";
-      if (item.versionLabel) label += " " + item.versionLabel;
-      var file = new File(item.manifestPath);
-      if (!file.exists) label += "（找不到）";
-      recent.add("item", label);
+    for (i = 0; i < ui.existing.length; i++) {
+      var meta = ui.existing[i].meta || {};
+      instancePick.add("item", meta.displayName || ui.existing[i].instanceId);
     }
-    recent.selection = 0;
-    VN._fillingRecent = false;
+    if (instancePick.items.length) instancePick.selection = 0;
   }
 
   function renderChrome() {
-    var state = ui.state;
-    var busy = state === "checking" || state === "importing";
+    var busy = ui.busy;
     var ready = ui.inspection && ui.inspection.ok;
+    var count = ui.existing.length;
     chooseButton.enabled = !busy;
-    recent.enabled = !busy;
-    destination.enabled = ready && !busy;
-    importButton.enabled = (state === "ready" || state === "success") && !busy;
-    moreButton.enabled = !busy;
-    setShown(emptyText, state === "empty");
-    setShown(summary, !!ready);
-    setShown(errorBox, state === "invalid" || state === "failed");
-    setShown(destinationLabel, !!ready && state !== "importing");
-    setShown(destination, !!ready && state !== "importing");
-    setShown(targetText, !!ready && state !== "importing");
-    setShown(importButton, state !== "duplicate");
-    setShown(openLastButton, state === "success" && ui.lastResult && ui.lastResult.master);
-    setShown(duplicateBox, state === "duplicate");
-    setShown(menu, ui.menuOpen && !busy);
-    setShown(extraBox, !!ui.extraMode && !busy);
-    if (!busy && state !== "failed" && state !== "invalid") {
-      if (!detailsBox.text || ui.extraMode) setShown(detailsBox, !!ui.extraMode && !!detailsBox.text);
-    }
+    primaryButton.enabled = !busy && ((ready && count === 0) || count > 0);
+    primaryButton.text = count ? "打开片段" : "导入片段";
+    setShown(instancePick, count > 1);
+    setShown(summaryName, true);
+    setShown(summaryMeta, !!ready);
+    setShown(errorBox, ui.inspection && !ui.inspection.ok);
+    var context = ui.context;
+    var unique = context && context.status === "unique";
+    setShown(playBox, !!unique && !busy);
+    setShown(textBox, !!(context && context.textLayers && context.textLayers.length) && !busy);
+    if (!unique && context && context.status === "ambiguous") setLabel(statusText, context.message);
     layoutNow();
   }
 
   function applyInspection(inspection, manifestFile) {
     ui.inspection = inspection;
     ui.manifestFile = manifestFile || ui.manifestFile;
-    ui.contextSignature = "";
+    ui.signature = "";
     if (!inspection || !inspection.ok) {
-      ui.state = inspection ? "invalid" : "empty";
+      setLabel(summaryName, inspection ? inspection.message : "选择一个作品包开始");
+      setLabel(summaryMeta, " ");
       setLabel(errorTitle, inspection ? inspection.message : " ");
-      setLabel(errorHint, inspection ? inspection.hint : " ");
-      showDetails(inspection ? inspection.message + "\n" + inspection.hint + "\n" + inspection.details : "", !!inspection);
-      setStatus(inspection ? inspection.message : "选择一个作品包开始");
+      ui.existing = [];
+      setStatus(inspection ? inspection.message : "选择一个作品包开始", inspection ? inspection.details : "");
+      setShown(assetsButton, !!(inspection && inspection.message && inspection.message.indexOf("找不到") !== -1));
       renderChrome();
       return;
     }
     var manifest = inspection.manifest;
     var summaryInfo = manifest.summary;
-    setLabel(summaryName, manifest.displayName + "  " + (manifest.versionLabel || ""));
-    setLabel(summaryMeta, summaryInfo.sceneCount + " 个场景 · " + summaryInfo.textEventCount + " 段文字 · " + VN.formatDuration(summaryInfo.durationFrames, summaryInfo.fps));
-    setLabel(summaryHealth, "素材齐全，可以导入  ·  " + summaryInfo.width + " × " + summaryInfo.height + "  ·  " + summaryInfo.fps + " fps");
+    setLabel(summaryName, manifest.displayName || "作品");
+    setLabel(summaryMeta, summaryInfo.textEventCount + " 段文字 · " + VN.formatDuration(summaryInfo.durationFrames, summaryInfo.fps));
     ui.existing = VN.findBuildInstances(manifest.projectId, manifest.buildId);
-    if (ui.existing.length) {
-      ui.state = "duplicate";
-      setStatus("此版本已存在");
-      showDetails("", false);
-    } else {
-      ui.state = "ready";
-      setStatus("可以导入");
-      showDetails("", false);
-    }
+    fillInstances();
+    setStatus(ui.existing.length ? "此版本已在工程中" : "可以导入", "");
     renderChrome();
     syncContext();
   }
 
-  function loadManifest(file, repairedFrom, previousUsed) {
+  function loadManifest(file) {
     if (!file) return;
     try {
-      ui.state = "checking";
-      setStatus("正在检查素材与版本…");
+      ui.busy = true;
+      setStatus("正在检查素材与版本…", "");
       renderChrome();
       var inspection = VN.inspectPackage(file);
-      if (repairedFrom && inspection.ok) {
-        VN.replaceRecentPath(repairedFrom, {
-          displayName: inspection.manifest.displayName,
-          manifestPath: file.fsName,
-          lastUsedAt: previousUsed || "",
-          versionLabel: inspection.manifest.versionLabel
-        });
-        fillRecent();
-      }
+      ui.busy = false;
       applyInspection(inspection, file);
     } catch (err) {
-      ui.state = "failed";
-      setLabel(errorTitle, "无法读取作品包");
-      setLabel(errorHint, String(err));
-      showDetails(String(err), true);
-      setStatus(String(err));
-      renderChrome();
+      ui.busy = false;
+      ui.inspection = { ok: false, message: "无法读取作品包", details: String(err) };
+      applyInspection(ui.inspection, file);
     }
   }
 
-  function choosePackage() {
-    if (VN._importing) return;
-    var picked = File.openDialog("选择 vn-package.json", "JSON:*.json");
-    if (!picked) return;
-    loadManifest(picked, "");
+  function selectedExisting() {
+    if (!ui.existing.length) return null;
+    if (ui.existing.length === 1) return ui.existing[0];
+    var index = instancePick.selection ? instancePick.selection.index : 0;
+    return ui.existing[index] || ui.existing[0];
   }
 
-  function syncContext() {
-    if (VN._importing) return;
-    var context = VN.resolveContext();
-    ui.context = context;
-    var targetLabel = "导入后可自行拖入时间轴";
-    if (destination.selection && destination.selection.index === 1) {
-      targetLabel = context.insertTarget ? "插入到：" + context.insertTarget.name + " · " + context.insertTarget.timecode : "请先打开要插入的合成";
-    }
-    setLabel(targetText, targetLabel);
-    var identified = context.state === "instance" && context.instance;
-    setShown(currentPrompt, !identified);
-    setShown(currentName, !!identified);
-    setShown(currentRow, !!identified);
-    if (identified) setLabel(currentName, context.instance.displayName + (context.instance.versionLabel ? "  " + context.instance.versionLabel : ""));
-    var textCountValue = context.textLayers.length;
-    setShown(textBox, textCountValue > 0);
-    if (textCountValue > 0) {
-      setLabel(textCount, "已选择 " + textCountValue + " 个可处理的文字层");
-      setLabel(textPreview, shortText(context.textLayers[0].preview));
-    }
-    var instanceKey = identified ? context.instance.instanceId : context.state;
-    var signature = instanceKey + "|" + textCountValue + "|" + targetLabel;
-    if (signature === ui.contextSignature) return;
-    ui.contextSignature = signature;
-    layoutNow();
+  function openExisting() {
+    var chosen = selectedExisting();
+    if (!chosen) return;
+    var opened = VN.openLogicalComp(chosen.instanceId, "master");
+    setStatus(opened.ok ? "已打开片段" : opened.message, "");
+    ui.signature = "";
+    syncContext();
   }
 
-  function showFailure(result) {
-    ui.state = "failed";
-    setLabel(errorTitle, result.message);
-    setLabel(errorHint, result.hint || " ");
-    showDetails([result.message, result.hint, result.cleanup, result.details].join("\n"), true);
-    setStatus(result.message);
-    renderChrome();
-  }
-
-  function beginImport(asCopy) {
-    if (VN._importing || !ui.manifestFile) return;
+  function beginImport() {
+    if (ui.busy || !ui.manifestFile) return;
     var inspection = VN.inspectPackage(ui.manifestFile);
     if (!inspection.ok) {
       applyInspection(inspection, ui.manifestFile);
       return;
     }
-    ui.inspection = inspection;
+    ui.existing = VN.findBuildInstances(inspection.manifest.projectId, inspection.manifest.buildId);
+    if (ui.existing.length) {
+      fillInstances();
+      renderChrome();
+      openExisting();
+      return;
+    }
     try {
       VN.ensureVersion();
       if (app.project.numItems > 0) VN.ensureExpressionEngineCompatible();
     } catch (err) {
-      showFailure({
-        message: VN.friendlyImportError(err),
-        hint: "工程未被修改。",
-        cleanup: "工程未被修改。",
-        details: String(err)
-      });
+      setStatus(VN.friendlyImportError(err), String(err));
       return;
     }
-    if (!asCopy) {
-      var existing = VN.findBuildInstances(inspection.manifest.projectId, inspection.manifest.buildId);
-      if (existing.length) {
-        ui.existing = existing;
-        ui.state = "duplicate";
-        setStatus("此版本已存在");
-        renderChrome();
-        return;
-      }
-    }
-    var destinationName = destination.selection && destination.selection.index === 1 ? "comp" : "project";
-    var targetComp = null;
-    var insertTime = null;
-    var extendHost = false;
-    if (destinationName === "comp") {
-      var target = VN.currentInsertTarget();
-      if (!target) {
-        setStatus("请先打开要插入的合成。");
-        return;
-      }
-      var seconds = inspection.compiled.durationFrames / inspection.compiled.fps;
-      if (target.time + seconds > target.comp.duration + 0.0005) {
-        var agreed = confirm("片段会超出「" + target.comp.name + "」的结尾。\n是否延长这个合成后再导入？\n\n选择「否」将取消，不会修改工程。");
-        if (!agreed) {
-          setStatus("已取消导入，工程没有修改。");
-          return;
-        }
-        extendHost = true;
-      }
-      var again = VN.currentInsertTarget();
-      if (!again || again.comp !== target.comp) {
-        setStatus("当前合成已变化，导入已取消，工程没有修改。");
-        return;
-      }
-      if (again.time + seconds <= again.comp.duration + 0.0005) extendHost = false;
-      targetComp = again.comp;
-      insertTime = again.time;
-    }
-
-    VN._importing = true;
-    ui.state = "importing";
-    ui.menuOpen = false;
-    ui.extraMode = "";
-    setStatus("正在检查作品包…");
+    ui.busy = true;
     renderChrome();
-    VN.onImportPhase = function (phase) {
-      setStatus(phase === "assets" ? "正在导入素材…" : phase === "comps" || phase === "layers" ? "正在创建合成和图层…" : phase === "verify" ? "正在检查结果…" : "正在检查作品包…");
-    };
     var result;
     try {
       result = VN.runImport({
@@ -2556,216 +4079,221 @@ VN.buildPanel = function (thisObj) {
         packageRoot: inspection.packageRoot,
         displayName: inspection.manifest.displayName,
         versionLabel: inspection.manifest.versionLabel,
-        destination: destinationName,
+        destination: "project",
         saveProject: false,
-        extendHost: extendHost,
-        targetComp: targetComp,
-        insertTime: insertTime,
+        extendHost: false,
+        targetComp: null,
+        insertTime: null,
         activeItem: null,
         reportFile: new File(inspection.packageRoot.fsName + "/report.ae.json")
       });
     } finally {
-      VN.onImportPhase = null;
-      VN._importing = false;
+      ui.busy = false;
     }
-    ui.lastResult = result;
     if (result.ok) {
-      VN.rememberSuccessfulImport({
-        displayName: inspection.manifest.displayName,
-        manifestPath: ui.manifestFile.fsName,
-        lastUsedAt: VN.timestampNow(),
-        versionLabel: inspection.manifest.versionLabel
-      });
-      fillRecent();
-      ui.state = "success";
-      setLabel(summaryHealth, "此版本已导入当前工程");
-      setStatus(result.message);
-      showDetails(result.hint ? result.message + "\n" + result.hint + "\n" + result.details : "", !!result.hint);
+      try {
+        VN.rememberSuccessfulImport({
+          displayName: inspection.manifest.displayName,
+          manifestPath: ui.manifestFile.fsName,
+          lastUsedAt: VN.timestampNow(),
+          versionLabel: inspection.manifest.versionLabel
+        });
+      } catch (ignoreRemember) {}
+      if (result.master) {
+        try {
+          result.master.openInViewer();
+        } catch (ignoreOpen) {}
+      }
+      ui.existing = VN.findBuildInstances(inspection.manifest.projectId, inspection.manifest.buildId);
+      fillInstances();
+      setStatus(result.message || "已导入并打开片段", result.hint || "");
       renderChrome();
+      ui.signature = "";
       syncContext();
       return;
     }
-    showFailure(result);
-  }
-
-  function openExtra(mode) {
-    ui.menuOpen = false;
-    ui.extraMode = mode;
-    extraTitle.text = mode === "preset" ? "更换文字动画" : mode === "unlink" ? "独立编辑样式" : "批量调整节奏";
-    var context = VN.resolveContext();
-    ui.context = context;
-    scopeList.removeAll();
-    scopeList.add("item", "选中文字 · " + context.textLayers.length + " 层");
-    scopeList.add("item", "当前合成");
-    scopeList.add("item", "当前片段");
-    scopeList.selection = 0;
-    speedText.text = "1";
-    keepManual.value = false;
-    presetList.selection = 0;
-    setShown(speedLabel, mode === "speed");
-    setShown(speedText, mode === "speed");
-    setShown(keepManual, mode === "speed");
-    setShown(presetLabel, mode === "preset");
-    setShown(presetList, mode === "preset");
+    setStatus(result.message, [result.hint, result.cleanup, result.details].join("\n"));
     renderChrome();
   }
 
-  function selectedScope() {
-    if (!scopeList.selection || scopeList.selection.index === 0) return "selection";
-    if (scopeList.selection.index === 1) return "scene";
-    return "instance";
+  function syncSpeed(instanceId) {
+    var caps = VN.capabilitiesFor(instanceId);
+    ui.fillingSpeed = true;
+    speedSlider.value = caps.speedValue;
+    speedValue.text = String(caps.speedValue);
+    effectList.selection = caps.defaultEffect === "characterFade" ? 1 : 0;
+    ui.fillingSpeed = false;
+    setLabel(playDuration, currentText(instanceId));
+    setLabel(speedPreview, " ");
+    setLabel(effectNote, "默认效果：" + VN.effectLabel(caps.defaultEffect));
+    var enabled = !!caps.full;
+    effectList.enabled = enabled;
+    effectButton.enabled = enabled;
+    speedSlider.enabled = enabled;
+    speedValue.enabled = enabled;
+    styleButton.text = caps.style === "editor" ? "修改文字样式" : "打开原有样式控制";
   }
 
-  chooseButton.onClick = choosePackage;
-  recent.onChange = function () {
-    if (VN._fillingRecent || !recent.selection || recent.selection.index < 1) return;
-    var item = ui.recentItems[recent.selection.index - 1];
-    if (!item) return;
-    var file = new File(item.manifestPath);
-    if (!file.exists) {
-      setStatus("找不到这个作品包，请重新定位 vn-package.json。");
-      var picked = File.openDialog("重新定位 vn-package.json", "JSON:*.json");
-      if (!picked) return;
-      loadManifest(picked, item.manifestPath, item.lastUsedAt);
-      return;
-    }
-    loadManifest(file, "");
-  };
-  destination.onChange = function () {
-    ui.contextSignature = "";
-    syncContext();
-  };
-  importButton.onClick = function () {
-    beginImport(false);
-  };
-  copyImportButton.onClick = function () {
-    beginImport(true);
-  };
-  openExistingButton.onClick = function () {
-    if (!ui.existing.length) return;
-    var opened = VN.openLogicalComp(ui.existing[0].instanceId, "master");
-    setStatus(opened.ok ? "已打开已导入片段" : opened.message);
-  };
-  openLastButton.onClick = function () {
-    if (!ui.lastResult || !ui.lastResult.master) return;
-    ui.lastResult.master.openInViewer();
-    setStatus("已打开主合成");
-    ui.contextSignature = "";
-    syncContext();
-  };
-  openMasterButton.onClick = function () {
+  function syncContext() {
+    if (ui.busy || ui.dragging) return;
     var context = VN.resolveContext();
-    if (!context.instance) {
-      setStatus("请选择一个生成的片段");
+    ui.context = context;
+    var textCountValue = context.textLayers ? context.textLayers.length : 0;
+    var instanceKey = context.status === "unique" ? context.instanceId : context.status;
+    var signature = instanceKey + "|" + textCountValue + "|" + (ui.existing.length) + "|" + (context.message || "");
+    var changed = signature !== ui.signature;
+    if (context.status === "unique") {
+      var folder = VN.instanceFolderMeta(context.instanceId);
+      var name = context.instance && context.instance.displayName ? context.instance.displayName : context.instanceId;
+      if (folder && folder.meta.displayName) name = folder.meta.displayName;
+      setLabel(playName, name);
+      if (changed) syncSpeed(context.instanceId);
+      else setLabel(playDuration, currentText(context.instanceId));
+    }
+    if (textCountValue) setLabel(textCount, "已选中 " + textCountValue + " 段文字");
+    if (!changed) return;
+    ui.signature = signature;
+    renderChrome();
+  }
+
+  function selectionInstance() {
+    var context = VN.resolveContext();
+    ui.context = context;
+    if (!context.textLayers || !context.textLayers.length) return "";
+    var id = context.textLayers[0].meta.instanceId;
+    var i;
+    for (i = 1; i < context.textLayers.length; i++) {
+      if (context.textLayers[i].meta.instanceId !== id) return "";
+    }
+    return id;
+  }
+
+  function commitSpeed(raw) {
+    var context = ui.context;
+    if (!context || context.status !== "unique") return;
+    var speed = speedNumber(raw);
+    if (speed === null) {
+      setStatus("速度需要在 0.5 到 2 之间。", "");
+      syncSpeed(context.instanceId);
       return;
     }
-    var opened = VN.openLogicalComp(context.instance.instanceId, "master");
-    setStatus(opened.ok ? "已打开主合成" : opened.message);
+    var caps = VN.capabilitiesFor(context.instanceId);
+    if (Math.abs(speed - caps.speedValue) < 0.001) {
+      setLabel(speedPreview, " ");
+      return;
+    }
+    var lock = ui.speedLock || VN.captureLock(context.instanceId);
+    ui.busy = true;
+    speedSlider.enabled = false;
+    speedValue.enabled = false;
+    effectButton.enabled = false;
+    var result = VN.executeSpeed(lock, speed);
+    ui.busy = false;
+    ui.speedLock = null;
+    ui.dragging = false;
+    syncSpeed(context.instanceId);
+    setStatus(result.message, result.status === "failed" ? result.message : "");
+    renderChrome();
+  }
+
+  chooseButton.onClick = function () {
+    if (ui.busy) return;
+    var picked = File.openDialog("选择 vn-package.json", "JSON:*.json");
+    if (!picked) return;
+    loadManifest(picked);
+  };
+  primaryButton.onClick = function () {
+    if (ui.existing.length) openExisting();
+    else beginImport();
   };
   styleButton.onClick = function () {
     var context = VN.resolveContext();
-    if (context.state === "ambiguous" || !context.instance) {
-      setStatus("请选择一个生成的片段");
+    if (!context || context.status !== "unique") {
+      setStatus("请先打开一个生成片段。", "");
       return;
     }
-    var opened = VN.openLogicalComp(context.instance.instanceId, "global:control");
-    setStatus(opened.ok ? "已打开全局样式" : opened.message);
+    var result = VN.openStyleEditor(context.instanceId);
+    setStatus(result.message, "");
+  };
+  effectButton.onClick = function () {
+    var context = VN.resolveContext();
+    if (!context || context.status !== "unique") {
+      setStatus("请先打开一个生成片段。", "");
+      return;
+    }
+    var effect = effectList.selection && effectList.selection.index === 1 ? "characterFade" : "typewriter";
+    var lock = VN.captureLock(context.instanceId);
+    ui.busy = true;
+    renderChrome();
+    var result = VN.executeEffect(lock, effect);
+    ui.busy = false;
+    var retained = 0;
+    var i;
+    for (i = 0; i < result.items.length; i++) if (result.items[i].status !== "updated") retained += 1;
+    if (result.status === "updated" || result.status === "partial") {
+      setLabel(effectNote, "默认效果：" + VN.effectLabel(effect) + (retained ? "\n" + retained + " 段保留原效果" : ""));
+    }
+    setStatus(result.message, result.status === "failed" || result.status === "partial" ? result.message : "");
+    ui.signature = "";
+    syncContext();
+  };
+  speedSlider.onChanging = function () {
+    if (ui.fillingSpeed) return;
+    var context = ui.context;
+    if (!context || context.status !== "unique") return;
+    if (!ui.speedLock) ui.speedLock = VN.captureLock(context.instanceId);
+    ui.dragging = true;
+    var speed = speedNumber(speedSlider.value) || speedSlider.value;
+    speedValue.text = String(Math.round(speedSlider.value * 100) / 100);
+    setLabel(speedPreview, predictedText(context.instanceId, speedSlider.value));
+  };
+  speedSlider.onChange = function () {
+    if (ui.fillingSpeed) return;
+    ui.dragging = false;
+    commitSpeed(speedSlider.value);
+  };
+  speedValue.onChange = function () {
+    if (ui.fillingSpeed) return;
+    ui.speedLock = ui.context && ui.context.status === "unique" ? VN.captureLock(ui.context.instanceId) : null;
+    commitSpeed(speedValue.text);
   };
   rebuildButton.onClick = function () {
-    var result = VN.rebuildSelectedText();
-    setStatus(result.message);
-    showDetails(result.details, !!result.details);
+    var instanceId = selectionInstance();
+    if (!instanceId) {
+      setStatus("请选中同一个片段里的文字。", "");
+      return;
+    }
+    var lock = VN.captureLock(instanceId);
+    ui.busy = true;
     renderChrome();
-  };
-  recheckButton.onClick = function () {
-    if (ui.manifestFile) loadManifest(ui.manifestFile, "");
+    var result = VN.executeRebuild(lock);
+    ui.busy = false;
+    var details = "";
+    var i;
+    for (i = 0; i < result.items.length; i++) {
+      if (result.items[i].status !== "updated" && result.items[i].message) details += result.items[i].message + "\n";
+    }
+    setStatus(result.message, details);
+    renderChrome();
   };
   copyButton.onClick = function () {
-    var payload = [errorTitle.text, errorHint.text, detailsBox.text].join("\n");
-    setStatus(VN.copyText(payload) ? "已复制错误详情" : "请在详情框中全选复制");
+    var payload = errorTitle.text + "\n" + detailsBox.text;
+    setStatus(VN.copyText(payload) ? "已复制错误详情" : "请在详情框中全选复制", detailsBox.text);
   };
-  moreButton.onClick = function () {
-    ui.menuOpen = !ui.menuOpen;
-    renderChrome();
-  };
-  speedMenu.onClick = function () {
-    openExtra("speed");
-  };
-  presetMenu.onClick = function () {
-    openExtra("preset");
-  };
-  unlinkMenu.onClick = function () {
-    openExtra("unlink");
-  };
-  checkMenu.onClick = function () {
-    ui.menuOpen = false;
-    var context = VN.resolveContext();
-    if (!context.instance) {
-      setStatus("请选择一个生成的片段");
-      renderChrome();
-      return;
-    }
-    var result = VN.applyToTargets("instance", "VN Check", function (layer, comp) {
-      return VN.checkLayer(layer, comp);
-    });
-    setStatus(result.ok ? "已检查当前片段" : result.message);
-    showDetails(result.notes ? result.notes.join("\n") : "", result.ok);
-    renderChrome();
-  };
-  infoMenu.onClick = function () {
-    ui.menuOpen = false;
-    if (!ui.inspection || !ui.inspection.ok) {
-      setStatus("请先选择作品包");
-      renderChrome();
-      return;
-    }
-    showDetails(ui.inspection.details, true);
-    renderChrome();
-  };
-  assetsMenu.onClick = function () {
-    ui.menuOpen = false;
-    renderChrome();
+  assetsButton.onClick = function () {
     if (!ui.inspection || !ui.inspection.packageRoot) {
-      setStatus("请先选择作品包");
+      setStatus("请先选择作品包", "");
       return;
     }
     var folder = new Folder(ui.inspection.packageRoot.fsName + "/assets");
     if (!folder.exists) folder = ui.inspection.packageRoot;
     folder.execute();
   };
-  extraClose.onClick = function () {
-    ui.extraMode = "";
-    renderChrome();
-  };
-  extraApply.onClick = function () {
-    var scopeName = selectedScope();
-    var result;
-    if (ui.extraMode === "speed") {
-      var speed = parseFloat(speedText.text);
-      if (!(speed > 0)) {
-        setStatus("速度倍率必须大于 0。");
-        return;
-      }
-      var manual = keepManual.value;
-      result = VN.applyToTargets(scopeName, "VN Apply Speed", function (layer, comp) {
-        return VN.applySpeedToLayer(layer, comp, speed, manual);
-      });
-    } else if (ui.extraMode === "preset") {
-      var preset = presetList.selection && presetList.selection.index === 1 ? "lines" : presetList.selection && presetList.selection.index === 2 ? "fade" : "typewriter";
-      result = VN.applyToTargets(scopeName, "VN Apply Preset", function (layer, comp) {
-        return VN.applyPresetToLayer(layer, comp, preset);
-      });
-    } else {
-      result = VN.applyToTargets(scopeName, "VN Unlink Style", function (layer, comp) {
-        return VN.unlinkStyle(layer, comp);
-      });
-    }
-    ui.extraMode = "";
-    setStatus(result.ok ? "已处理 " + result.notes.length + " 个文字层" : result.message);
-    showDetails(result.notes ? result.notes.join("\n") : "", !!(result.notes && result.notes.length));
-    renderChrome();
-  };
 
+  try {
+    win.onResize = function () { layoutNow(); };
+    win.onResizing = function () { layoutNow(); };
+  } catch (ignoreResize) {}
   try {
     win.onClose = function () {
       VN._panel = null;
@@ -2774,16 +4302,13 @@ VN.buildPanel = function (thisObj) {
   } catch (ignoreClose) {}
 
   VN.syncPanelContext = syncContext;
-  layoutNow();
-  fillRecent();
-  setShown(menu, false);
-  setShown(extraBox, false);
-  setShown(detailsBox, false);
+  setShown(playBox, false);
   setShown(textBox, false);
+  setShown(errorBox, false);
+  setShown(detailsBox, false);
+  setShown(instancePick, false);
+  layoutNow();
   applyInspection(null, null);
-  ui.state = "empty";
-  setStatus("选择一个作品包开始");
-  renderChrome();
   syncContext();
   VN.ensurePolling();
   if (!hosted) {
