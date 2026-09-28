@@ -179,3 +179,16 @@ export function fadeOpacityKeyframes(holdInFrames: number, fadeFrames: number): 
   ];
 }
 
+export function scaleKeyframeSpacing<T extends ScalarKeyframe>(keys: T[], speed: number): T[] {
+  if (!Number.isFinite(speed) || speed <= 0) throw new Error("速度倍率必须大于 0");
+  const ordered = [...keys].sort((a, b) => a.frame - b.frame);
+  if (ordered.length === 0) return [];
+  const anchor = ordered[0].frame;
+  const byFrame = new Map<number, T>();
+  for (const key of ordered) {
+    const frame = anchor + Math.round((key.frame - anchor) / speed);
+    byFrame.set(frame, { ...key, frame });
+  }
+  return [...byFrame.values()].sort((a, b) => a.frame - b.frame);
+}
+

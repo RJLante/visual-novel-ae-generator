@@ -43,6 +43,10 @@ export function exportBuild(input: {
     path.join(outputDir, "convert_v1_text_animation.jsx"),
     `${header(input.compiled, "打开第一版工程中的合成后运行。把生成器管理的动画表达式采样成关键帧，保留样式表达式。")}\n${readAe("lib.jsx")}\n${readAe("migrate-v1.jsx")}\nVN.migrate();\n`,
   );
+  writeJsx(
+    path.join(outputDir, "vn_panel.jsx"),
+    `${header(input.compiled, "在 After Effects 里运行后打开操作面板。默认只处理选中的文字；手工改过的关键帧不会被刷新覆盖。")}\n${readAe("lib.jsx")}\n${readAe("project.jsx")}\n${readAe("layers.jsx")}\n${readAe("timing.jsx")}\n${readAe("refresh.jsx")}\n${readAe("tools.jsx")}\n${readAe("bootstrap.jsx")}\n${readAe("panel.jsx")}\nVN.showPanel();\n`,
+  );
 
   const report = {
     ok: true,
@@ -64,6 +68,7 @@ export function exportBuild(input: {
       "generate_project.jsx",
       "refresh_text_timing.jsx",
       "convert_v1_text_animation.jsx",
+      "vn_panel.jsx",
       "compiled.json",
       "source/project.json",
       "source/theme.json",

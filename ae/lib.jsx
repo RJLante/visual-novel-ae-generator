@@ -16,6 +16,7 @@ VN.addComp = function (folder, name, width, height, frames, fps) {
 };
 
 VN.scriptFolder = function () {
+  if (VN.packageFolder) return VN.packageFolder;
   if (!$.fileName) {
     throw new Error("请用「文件 > 脚本 > 运行脚本文件」执行，不要把脚本贴进控制台。");
   }
@@ -126,6 +127,12 @@ VN.interpolationName = function (kind) {
 
 VN.clearKeys = function (prop) {
   while (prop.numKeys > 0) prop.removeKey(1);
+};
+
+VN.applyScalarKeysKeepingExpression = function (prop, comp, keys) {
+  var expression = prop.expression;
+  VN.applyScalarKeys(prop, comp, keys);
+  if (expression) prop.expression = expression;
 };
 
 VN.applyScalarKeys = function (prop, comp, keys) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_TIMING, type TimingSettings } from "../src/types";
-import { fadeOpacityKeyframes, planCharacters, revealFramesFor, revealKeyframes, secondsToFrames } from "../src/timing";
+import { fadeOpacityKeyframes, planCharacters, revealFramesFor, revealKeyframes, scaleKeyframeSpacing, secondsToFrames } from "../src/timing";
 
 const timing: TimingSettings = { ...DEFAULT_TIMING };
 const fps = 30;
@@ -92,6 +92,44 @@ test("淡入关键帧从提前进入的黑场保持到淡入结束", () => {
     { frame: 21, value: 100, interpolation: "linear" },
   ]);
   assert.deepEqual(fadeOpacityKeyframes(4, 0), [{ frame: 0, value: 100, interpolation: "linear" }]);
+});
+
+test("速度缩放保持第一帧，同帧碰撞保留较晚的计数", () => {
+  const keys = [
+    { frame: 0, value: 1, interpolation: "hold" as const },
+    { frame: 10, value: 2, interpolation: "hold" as const },
+    { frame: 20, value: 3, interpolation: "hold" as const },
+  ];
+  assert.deepEqual(
+    scaleKeyframeSpacing(keys, 2).map((key) => [key.frame, key.value]),
+    [
+      [0, 1],
+      [5, 2],
+      [10, 3],
+    ],
+  );
+  assert.deepEqual(
+    scaleKeyframeSpacing(
+      [
+        { frame: 0, value: 1, interpolation: "hold" },
+        { frame: 1, value: 2, interpolation: "hold" },
+        { frame: 2, value: 3, interpolation: "hold" },
+      ],
+      2,
+    ).map((key) => [key.frame, key.value]),
+    [
+      [0, 1],
+      [1, 3],
+    ],
+  );
+  assert.deepEqual(
+    scaleKeyframeSpacing(keys, 0.5).map((key) => [key.frame, key.value]),
+    [
+      [0, 1],
+      [20, 2],
+      [40, 3],
+    ],
+  );
 });
 
 test("逐行先逐字打完一行，再隔行距开始下一行", () => {

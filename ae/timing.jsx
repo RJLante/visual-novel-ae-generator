@@ -156,3 +156,46 @@ VN.revealKeyframes = function (appearFrames, holdInFrames) {
   keys.sort(function (a, b) { return a.frame - b.frame; });
   return keys;
 };
+
+VN.fadeOpacityKeyframes = function (holdInFrames, fadeFrames) {
+  if (fadeFrames <= 0) return [{ frame: 0, value: 100, interpolation: "linear" }];
+  var end = holdInFrames + fadeFrames;
+  if (holdInFrames <= 0) {
+    return [
+      { frame: 0, value: 0, interpolation: "linear" },
+      { frame: end, value: 100, interpolation: "linear" }
+    ];
+  }
+  return [
+    { frame: 0, value: 0, interpolation: "linear" },
+    { frame: holdInFrames, value: 0, interpolation: "linear" },
+    { frame: end, value: 100, interpolation: "linear" }
+  ];
+};
+
+VN.scaleKeyframeSpacing = function (keys, speed) {
+  if (!(speed > 0)) throw new Error("速度倍率必须大于 0");
+  var ordered = [];
+  var i;
+  for (i = 0; i < keys.length; i++) {
+    ordered.push({
+      frame: keys[i].frame,
+      value: keys[i].value,
+      interpolation: keys[i].interpolation || "hold"
+    });
+  }
+  ordered.sort(function (a, b) { return a.frame - b.frame; });
+  if (!ordered.length) return [];
+  var anchor = ordered[0].frame;
+  var byFrame = {};
+  var frames = [];
+  for (i = 0; i < ordered.length; i++) {
+    var frame = anchor + Math.round((ordered[i].frame - anchor) / speed);
+    if (byFrame[frame] === undefined) frames.push(frame);
+    byFrame[frame] = { frame: frame, value: ordered[i].value, interpolation: ordered[i].interpolation };
+  }
+  frames.sort(function (a, b) { return a - b; });
+  var out = [];
+  for (i = 0; i < frames.length; i++) out.push(byFrame[frames[i]]);
+  return out;
+};

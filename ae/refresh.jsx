@@ -55,7 +55,7 @@ VN.refreshLayer = function (layer, comp) {
   var raw = VN.readBaseText(layer);
   var plan = VN.planCharacters(raw, timingInfo.timing, timingInfo.fps);
   var frames = meta.preset === "lines" ? plan.lineFrames : plan.revealFrames;
-  var keys = VN.revealKeyframes(frames, meta.holdIn || 0);
+  var keys = VN.scaleKeyframeSpacing(VN.revealKeyframes(frames, meta.holdIn || 0), meta.speedScale || 1);
   VN.applyScalarKeys(start, comp, keys);
   var end = VN.selectorProp(selector, "ADBE Text Index End");
   if (end !== null) {

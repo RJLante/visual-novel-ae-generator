@@ -18,6 +18,7 @@ test("build 输出 JSX、编排、配置快照和检查报告", () => {
     "generate_project.jsx",
     "refresh_text_timing.jsx",
     "convert_v1_text_animation.jsx",
+    "vn_panel.jsx",
     "compiled.json",
     "report.json",
   ]) {
@@ -33,6 +34,7 @@ test("build 输出 JSX、编排、配置快照和检查报告", () => {
   assert.equal(jsxText.includes("2022"), false);
   assert.match(fs.readFileSync(path.join(outputDir, "refresh_text_timing.jsx"), "utf8"), /VN\.refresh\(\)/);
   assert.match(fs.readFileSync(path.join(outputDir, "convert_v1_text_animation.jsx"), "utf8"), /VN\.migrate\(\)/);
+  assert.match(fs.readFileSync(path.join(outputDir, "vn_panel.jsx"), "utf8"), /VN\.showPanel\(\)/);
   const compiled = JSON.parse(fs.readFileSync(path.join(outputDir, "compiled.json"), "utf8")) as {
     schemaVersion: number;
     assets: { absolutePath: string; relativePath: string }[];
