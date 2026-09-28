@@ -1,4 +1,10 @@
-import { LONG_PAUSE_CHARS, SHORT_PAUSE_CHARS, type AnimationName, type TimingSettings } from "./types";
+import {
+  LONG_PAUSE_CHARS,
+  SHORT_PAUSE_CHARS,
+  type AnimationName,
+  type ScalarKeyframe,
+  type TimingSettings,
+} from "./types";
 
 export function secondsToFrames(seconds: number, fps: number): number {
   if (!Number.isFinite(seconds) || !Number.isFinite(fps) || fps <= 0) {
@@ -139,8 +145,37 @@ function typeLine(
   return appearFrame(visible.length, pauseFrames, timing.charactersPerSecond, fps);
 }
 
-export function animationModeNumber(animation: AnimationName): 1 | 2 | 3 {
-  if (animation === "typewriter") return 1;
-  if (animation === "fade") return 2;
-  return 3;
+export function revealKeyframes(appearFrames: number[], holdInFrames: number): ScalarKeyframe[] {
+  const countAt = (frame: number) => appearFrames.reduce((count, appear) => count + (appear <= frame ? 1 : 0), 0);
+  const keys: ScalarKeyframe[] = [];
+  const push = (frame: number, value: number) => {
+    const existing = keys.find((key) => key.frame === frame);
+    if (existing) existing.value = value;
+    else keys.push({ frame, value, interpolation: "hold" });
+  };
+  if (appearFrames.length === 0) {
+    push(Math.max(0, holdInFrames), 0);
+    return keys;
+  }
+  if (holdInFrames > 0) push(0, countAt(0));
+  const unique = [...new Set(appearFrames)].sort((a, b) => a - b);
+  for (const frame of unique) push(holdInFrames + frame, countAt(frame));
+  return keys.sort((a, b) => a.frame - b.frame);
 }
+
+export function fadeOpacityKeyframes(holdInFrames: number, fadeFrames: number): ScalarKeyframe[] {
+  if (fadeFrames <= 0) return [{ frame: 0, value: 100, interpolation: "linear" }];
+  const end = holdInFrames + fadeFrames;
+  if (holdInFrames <= 0) {
+    return [
+      { frame: 0, value: 0, interpolation: "linear" },
+      { frame: end, value: 100, interpolation: "linear" },
+    ];
+  }
+  return [
+    { frame: 0, value: 0, interpolation: "linear" },
+    { frame: holdInFrames, value: 0, interpolation: "linear" },
+    { frame: end, value: 100, interpolation: "linear" },
+  ];
+}
+

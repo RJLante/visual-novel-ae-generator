@@ -1,13 +1,18 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   COMP,
   EFFECT_NAMES,
+  eventLogicalId,
   FOLDERS,
   FRAME_HEIGHT,
   FRAME_WIDTH,
   GENERATOR_VERSION,
+  LOGICAL,
   LONG_PAUSE_CHARS,
+  sceneLogicalId,
   SHORT_PAUSE_CHARS,
+  textLogicalId,
   type CompiledComp,
   type CompiledLayer,
   type CompiledProject,
@@ -22,8 +27,15 @@ import {
   type StyleRole,
   type TimelineEntry,
 } from "./types";
-import { CONTROL_GUIDE, revealExpressions, sourceTextExpression, textOpacityExpression } from "./ae-expressions";
-import { animationModeNumber, planCharacters, revealFramesFor, secondsToFrames, type CharacterPlan } from "./timing";
+import { CONTROL_GUIDE, sourceTextExpression, textOpacityExpression } from "./ae-expressions";
+import {
+  fadeOpacityKeyframes,
+  planCharacters,
+  revealFramesFor,
+  revealKeyframes,
+  secondsToFrames,
+  type CharacterPlan,
+} from "./timing";
 
 interface TimedEvent {
   source: NormalizedEvent;
@@ -91,6 +103,7 @@ export function compile(
 
   const durationFrames = scenes.reduce((sum, scene) => sum + scene.durationFrames, 0);
   comps.push({
+    logicalId: LOGICAL.overlay,
     name: COMP.overlay,
     folder: "ROOT",
     width: project.width,
@@ -104,9 +117,10 @@ export function compile(
     errors,
     warnings,
     compiled: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       generatorVersion: GENERATOR_VERSION,
       id: project.id,
+      buildId: buildIdFor(project),
       name: project.name,
       width: project.width,
       height: project.height,
@@ -276,7 +290,7 @@ function textEventComp(event: TimedEvent, source: NormalizedTextEvent, project: 
       position: [project.theme.layout.dialogueBox.x, project.theme.layout.dialogueBox.y],
     });
   }
-  layers.push(bodyTextLayer(`TEXT_${source.id}`, source.text, box, style, role, source.animation, plan, event, project, true));
+  layers.push(bodyTextLayer(`TEXT_${source.id}`, source.text, box, style, role, source.animation, plan, event, true, undefined, errors));
   return eventComp(event, project, layers, errors);
 }
 
@@ -356,12 +370,12 @@ function choiceComp(
         "fade",
         plan,
         event,
-        project,
         false,
         uniqueKeys([
           [appear, 0],
           [shown, 100],
         ]),
+        errors,
       ),
     );
   }
@@ -407,6 +421,7 @@ function transitionComp(event: TimedEvent, project: NormalizedProject): Compiled
     [event.durationFrames, event.holdBlack ? 100 : 0],
   ]);
   return {
+    logicalId: eventLogicalId(event.source.id),
     name: `EVENT_${event.source.id}`,
     folder: "EVENTS",
     width: project.width,
@@ -436,13 +451,20 @@ function bodyTextLayer(
   animation: "typewriter" | "fade" | "lines",
   plan: CharacterPlan,
   event: TimedEvent,
-  project: NormalizedProject,
-  fadeWithMode: boolean,
-  opacityKeys?: Keyframe[],
+  ownFade: boolean,
+  opacityKeys: Keyframe[] | undefined,
+  errors: Issue[],
 ): CompiledLayer {
-  const presetMode = animationModeNumber(animation);
-  return {
+  const revealKeys =
+    animation === "fade" ? undefined : revealKeyframes(animation === "lines" ? plan.lineFrames : plan.revealFrames, event.holdInFrames);
+  const fadeKeys: Keyframe[] | undefined =
+    animation === "fade" && ownFade ? fadeOpacityKeyframes(event.holdInFrames, plan.fadeFrames) : opacityKeys;
+  const layer: CompiledLayer = {
     name,
+    logicalId: textLogicalId(name),
+    eventId: event.source.id,
+    holdInFrames: event.holdInFrames,
+    eventFrames: event.durationFrames,
     kind: "text",
     aeText: text.replace(/\n/g, "\r"),
     box,
@@ -453,23 +475,27 @@ function bodyTextLayer(
     anchor: [0, 0],
     position: [box.x, box.y],
     sourceTextExpression: sourceTextExpression(role),
-    opacityExpression: textOpacityExpression({
-      presetMode,
-      fps: project.fps,
-      holdInFrames: event.holdInFrames,
-      fadeFrames: plan.fadeFrames,
-      fadeWithMode,
-    }),
-    opacityKeys,
-    reveal: revealExpressions({
-      revealFrames: plan.revealFrames,
-      lineFrames: plan.lineFrames,
-      presetMode,
-      fps: project.fps,
-      holdInFrames: event.holdInFrames,
-      eventFrames: event.durationFrames,
-    }),
+    opacityExpression: textOpacityExpression(),
+    opacityKeys: fadeKeys,
+    textAnimation: {
+      preset: animation,
+      revealKeys,
+      opacityKeys: fadeKeys?.map((key) => ({
+        frame: key.frame,
+        value: key.value,
+        interpolation: key.interpolation ?? "linear",
+      })),
+    },
   };
+  const durationFrames = eventCompFrames(event);
+  if (revealKeys && revealKeys.length > 0 && revealKeys[revealKeys.length - 1].frame >= durationFrames) {
+    const last = revealKeys[revealKeys.length - 1].frame;
+    errors.push({
+      path: name,
+      message: `最后一个文字关键帧在第 ${last} 帧，事件合成只有 ${durationFrames} 帧`,
+    });
+  }
+  return layer;
 }
 
 function eventComp(event: TimedEvent, project: NormalizedProject, layers: CompiledLayer[], errors: Issue[]): CompiledComp {
@@ -478,6 +504,7 @@ function eventComp(event: TimedEvent, project: NormalizedProject, layers: Compil
     errors.push({ path: `event ${event.source.id}`, message: "事件长度小于 1 帧" });
   }
   return {
+    logicalId: eventLogicalId(event.source.id),
     name: `EVENT_${event.source.id}`,
     folder: "EVENTS",
     width: project.width,
@@ -511,6 +538,7 @@ function sceneComp(scene: TimedScene, project: NormalizedProject, errors: Issue[
       name: `EVENT_${event.source.id}`,
       kind: "precomp",
       compName: `EVENT_${event.source.id}`,
+      compRef: eventLogicalId(event.source.id),
       inFrame,
       outFrame,
     });
@@ -533,6 +561,7 @@ function sceneComp(scene: TimedScene, project: NormalizedProject, errors: Issue[
     });
   }
   return {
+    logicalId: sceneLogicalId(scene.id),
     name: `SCENE_${scene.id}`,
     folder: "SCENES",
     width: project.width,
@@ -544,6 +573,7 @@ function sceneComp(scene: TimedScene, project: NormalizedProject, errors: Issue[
 
 function masterComp(scenes: TimedScene[], durationFrames: number, project: NormalizedProject): CompiledComp {
   return {
+    logicalId: LOGICAL.master,
     name: COMP.master,
     folder: "ROOT",
     width: project.width,
@@ -554,6 +584,7 @@ function masterComp(scenes: TimedScene[], durationFrames: number, project: Norma
         name: `SCENE_${scene.id}`,
         kind: "precomp" as const,
         compName: `SCENE_${scene.id}`,
+        compRef: sceneLogicalId(scene.id),
         inFrame: scene.logicalStart - scene.leadFrames,
         outFrame: scene.logicalStart + scene.durationFrames,
       })),
@@ -561,6 +592,7 @@ function masterComp(scenes: TimedScene[], durationFrames: number, project: Norma
         name: COMP.overlay,
         kind: "precomp" as const,
         compName: COMP.overlay,
+        compRef: LOGICAL.overlay,
         inFrame: 0,
         outFrame: durationFrames,
       },
@@ -570,6 +602,7 @@ function masterComp(scenes: TimedScene[], durationFrames: number, project: Norma
 
 function controlComp(project: NormalizedProject): CompiledComp {
   return {
+    logicalId: LOGICAL.control,
     name: COMP.control,
     folder: "GLOBAL",
     width: project.width,
@@ -583,8 +616,6 @@ function controlComp(project: NormalizedProject): CompiledComp {
         effects: [
           { type: "slider", name: EFFECT_NAMES.fontSizeMultiplier, value: 1 },
           { type: "slider", name: EFFECT_NAMES.globalTextOpacity, value: 100 },
-          { type: "slider", name: EFFECT_NAMES.textAnimationMode, value: 0 },
-          { type: "slider", name: EFFECT_NAMES.previewSpeed, value: 1 },
           { type: "checkbox", name: EFFECT_NAMES.unifyFont, value: false },
           { type: "checkbox", name: EFFECT_NAMES.unifyColor, value: false },
         ],
@@ -613,6 +644,7 @@ function styleComp(
   project: NormalizedProject,
 ): CompiledComp {
   return {
+    logicalId: styleLogicalId(name),
     name,
     folder: "GLOBAL",
     width: project.width,
@@ -636,6 +668,16 @@ function styleComp(
   };
 }
 
+function styleLogicalId(name: string): string {
+  if (name === COMP.styleNarration) return LOGICAL.styleNarration;
+  if (name === COMP.styleOption) return LOGICAL.styleOption;
+  return LOGICAL.styleDialogue;
+}
+
+function buildIdFor(project: NormalizedProject): string {
+  return createHash("sha256").update(JSON.stringify({ id: project.id, timing: project.timing, scenes: project.scenes })).digest("hex").slice(0, 8);
+}
+
 function eventCompFrames(event: TimedEvent): number {
   return event.holdInFrames + event.durationFrames + event.holdOutFrames;
 }
@@ -652,7 +694,7 @@ function uniqueKeys(pairs: Array<[number, number]>): Keyframe[] {
   for (const [frame, value] of pairs) values.set(frame, value);
   return [...values.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([frame, value]) => ({ frame, value }));
+    .map(([frame, value]) => ({ frame, value, interpolation: "linear" as const }));
 }
 
 function warnLayout(project: NormalizedProject, warnings: Issue[]): void {

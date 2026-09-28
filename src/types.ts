@@ -1,4 +1,5 @@
-export const GENERATOR_VERSION = "0.1.0";
+export const GENERATOR_VERSION = "0.2.0";
+export const REVEAL_END_INDEX = 99999;
 
 export const FRAME_WIDTH = 1920;
 export const FRAME_HEIGHT = 1080;
@@ -23,8 +24,6 @@ export const DEFAULT_TIMING = {
 export const EFFECT_NAMES = {
   fontSizeMultiplier: "字号倍率",
   globalTextOpacity: "全局文字不透明度",
-  textAnimationMode: "文字动画模式",
-  previewSpeed: "预览速度",
   unifyFont: "统一字体",
   unifyColor: "统一颜色",
 } as const;
@@ -39,6 +38,27 @@ export const COMP = {
   styleNarration: "STYLE_NARRATION",
   styleOption: "STYLE_OPTION",
 } as const;
+
+export const LOGICAL = {
+  master: "master",
+  overlay: "overlay",
+  control: "global:control",
+  styleDialogue: "style:dialogue",
+  styleNarration: "style:narration",
+  styleOption: "style:option",
+} as const;
+
+export function eventLogicalId(id: string): string {
+  return `event:${id}`;
+}
+
+export function sceneLogicalId(id: string): string {
+  return `scene:${id}`;
+}
+
+export function textLogicalId(name: string): string {
+  return `text:${name}`;
+}
 
 export const FOLDERS = ["ASSETS", "SOLIDS", "GLOBAL", "EVENTS", "SCENES"] as const;
 
@@ -174,9 +194,24 @@ export interface ImageAsset {
   height: number;
 }
 
+export type Interpolation = "hold" | "linear" | "bezier";
+
 export interface Keyframe {
   frame: number;
   value: number;
+  interpolation?: Interpolation;
+}
+
+export interface ScalarKeyframe {
+  frame: number;
+  value: number;
+  interpolation: Interpolation;
+}
+
+export interface TextAnimationSpec {
+  preset: AnimationName;
+  revealKeys?: ScalarKeyframe[];
+  opacityKeys?: ScalarKeyframe[];
 }
 
 export interface PositionKeyframe {
@@ -200,15 +235,13 @@ export interface CheckboxEffect {
 
 export type LayerEffect = SliderEffect | CheckboxEffect;
 
-export interface RevealExpressions {
-  start: string;
-  end: string;
-  amount: string;
-}
-
 export interface CompiledLayer {
   name: string;
   kind: "text" | "footage" | "solid" | "null" | "precomp";
+  logicalId?: string;
+  eventId?: string;
+  holdInFrames?: number;
+  eventFrames?: number;
   aeText?: string;
   box?: Rect;
   font?: string;
@@ -217,13 +250,14 @@ export interface CompiledLayer {
   rgb?: [number, number, number];
   sourceTextExpression?: string;
   opacityExpression?: string;
-  reveal?: RevealExpressions;
+  textAnimation?: TextAnimationSpec;
   assetId?: "background" | "dialogueFrame" | "cursor";
   fit?: Rect;
   color?: [number, number, number];
   solidWidth?: number;
   solidHeight?: number;
   compName?: string;
+  compRef?: string;
   effects?: LayerEffect[];
   anchor?: [number, number];
   position?: [number, number];
@@ -235,6 +269,7 @@ export interface CompiledLayer {
 }
 
 export interface CompiledComp {
+  logicalId: string;
   name: string;
   folder: (typeof FOLDERS)[number] | "ROOT";
   width: number;
@@ -253,9 +288,10 @@ export interface TimelineEntry {
 }
 
 export interface CompiledProject {
-  schemaVersion: 1;
+  schemaVersion: 2;
   generatorVersion: string;
   id: string;
+  buildId: string;
   name: string;
   width: number;
   height: number;

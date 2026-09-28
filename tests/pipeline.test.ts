@@ -14,7 +14,13 @@ test("build 输出 JSX、编排、配置快照和检查报告", () => {
   assert.equal(validated.ok, true, validated.errors.map((error) => error.message).join("\n"));
   const built = buildProject(projectDir, outputDir);
   assert.equal(built.ok, true, built.errors.map((error) => error.message).join("\n"));
-  for (const name of ["generate_project.jsx", "refresh_text_timing.jsx", "compiled.json", "report.json"]) {
+  for (const name of [
+    "generate_project.jsx",
+    "refresh_text_timing.jsx",
+    "convert_v1_text_animation.jsx",
+    "compiled.json",
+    "report.json",
+  ]) {
     assert.equal(fs.existsSync(path.join(outputDir, name)), true, name);
   }
   const jsx = fs.readFileSync(path.join(outputDir, "generate_project.jsx"));
@@ -22,12 +28,18 @@ test("build 输出 JSX、编排、配置快照和检查报告", () => {
   const jsxText = jsx.toString("utf8");
   assert.match(jsxText, /VN\.main\(\)/);
   assert.match(jsxText, /After Effects 2021/);
+  assert.match(jsxText, /ensureExpressionEngineCompatible/);
+  assert.equal(jsxText.includes("ensureEmptyProject"), false);
   assert.equal(jsxText.includes("2022"), false);
   assert.match(fs.readFileSync(path.join(outputDir, "refresh_text_timing.jsx"), "utf8"), /VN\.refresh\(\)/);
+  assert.match(fs.readFileSync(path.join(outputDir, "convert_v1_text_animation.jsx"), "utf8"), /VN\.migrate\(\)/);
   const compiled = JSON.parse(fs.readFileSync(path.join(outputDir, "compiled.json"), "utf8")) as {
-    assets: { absolutePath: string }[];
+    schemaVersion: number;
+    assets: { absolutePath: string; relativePath: string }[];
     timeline: unknown[];
   };
+  assert.equal(compiled.schemaVersion, 2);
+  assert.equal(compiled.assets[0].relativePath, "assets/background.png");
   assert.match(compiled.assets[0].absolutePath, /assets\/background\.png$/);
   assert.equal(fs.existsSync(path.join(outputDir, "source", "script.json")), true);
   assert.equal(fs.existsSync(path.join(outputDir, "assets", "cursor.png")), true);

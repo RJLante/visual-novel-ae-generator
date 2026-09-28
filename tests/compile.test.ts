@@ -51,10 +51,40 @@ test("选项光标从初始项移到预选结果，文字表达式不写死文�
   assert.ok((cursor.positionKeys?.[0].y ?? 0) > (cursor.positionKeys?.[2].y ?? 0));
   const text = layer(comp(compiled, "EVENT_d001"), "TEXT_d001");
   assert.match(text.sourceTextExpression ?? "", /setText\(base\)/);
-  assert.match(text.sourceTextExpression ?? "", /预览速度|字号倍率/);
+  assert.match(text.sourceTextExpression ?? "", /字号倍率/);
+  assert.match(text.sourceTextExpression ?? "", /\{\{comp:global:control\}\}/);
+  assert.equal(text.sourceTextExpression?.includes('comp("CONTROL")'), false);
   assert.equal(text.sourceTextExpression?.includes("连接已建立"), false);
-  assert.match(text.reveal?.start ?? "", /\/\*VN_REVEAL\*\/\[0,3,5/);
+  assert.equal(text.reveal, undefined);
+  assert.deepEqual(
+    text.textAnimation?.revealKeys?.map((key) => [key.frame, key.value]),
+    [
+      [0, 1],
+      [3, 2],
+      [5, 3],
+      [8, 4],
+      [10, 5],
+      [13, 6],
+      [24, 8],
+      [27, 9],
+      [29, 10],
+      [32, 11],
+      [34, 12],
+    ],
+  );
   assert.equal(text.aeText, "连接已建立。\r是否继续？");
+  const narration = layer(comp(compiled, "EVENT_n001"), "TEXT_n001");
+  assert.equal(narration.textAnimation?.preset, "fade");
+  assert.equal(narration.textAnimation?.revealKeys, undefined);
+  assert.deepEqual(
+    narration.opacityKeys?.map((key) => [key.frame, key.value, key.interpolation]),
+    [
+      [0, 0, "linear"],
+      [12, 100, "linear"],
+    ],
+  );
+  assert.match(narration.opacityExpression ?? "", /value \* \(globalOp \/ 100\)/);
+  assert.equal(layer(comp(compiled, "EVENT_c001"), "OPTION_continue_TEXT").textAnimation?.revealKeys, undefined);
 });
 
 test("工程结构保留全局控制，并且不把控制合成放进主合成", () => {
@@ -66,7 +96,10 @@ test("工程结构保留全局控制，并且不把控制合成放进主合成",
   );
   const control = comp(compiled, "CONTROL");
   const names = control.layers[0].effects?.map((effect) => effect.name);
-  assert.deepEqual(names, ["字号倍率", "全局文字不透明度", "文字动画模式", "预览速度", "统一字体", "统一颜色"]);
+  assert.deepEqual(names, ["字号倍率", "全局文字不透明度", "统一字体", "统一颜色"]);
+  assert.equal(compiled.schemaVersion, 2);
+  assert.match(compiled.buildId, /^[0-9a-f]{8}$/);
+  assert.equal(comp(compiled, "CONTROL").logicalId, "global:control");
   assert.equal(comp(compiled, "EVENT_d001").layers.map((item) => item.name).join(","), "DIALOGUE_FRAME,TEXT_d001");
   assert.equal(layer(comp(compiled, "EVENT_c001"), "OPTION_continue_TEXT").name, "OPTION_continue_TEXT");
 });
@@ -134,7 +167,10 @@ function tryCompile(script: Record<string, unknown>) {
   return normalizeProject(projectJson(), themeJson(), script);
 }
 
-function comp(compiled: { comps: { name: string; durationFrames: number; layers: CompiledLayer[] }[] }, name: string) {
+function comp(
+  compiled: { comps: { name: string; logicalId: string; durationFrames: number; layers: CompiledLayer[] }[] },
+  name: string,
+) {
   const found = compiled.comps.find((item) => item.name === name);
   assert.ok(found, name);
   return found!;
@@ -151,10 +187,12 @@ interface CompiledLayer {
   durationFrames?: number;
   inFrame?: number;
   outFrame?: number;
-  opacityKeys?: { frame: number; value: number }[];
+  opacityKeys?: { frame: number; value: number; interpolation?: string }[];
   positionKeys?: { frame: number; y: number; interp: string }[];
   sourceTextExpression?: string;
+  opacityExpression?: string;
   reveal?: { start: string };
+  textAnimation?: { preset?: string; revealKeys?: { frame: number; value: number }[] };
   aeText?: string;
   effects?: { name: string }[];
 }

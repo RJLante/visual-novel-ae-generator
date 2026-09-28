@@ -33,11 +33,15 @@ export function exportBuild(input: {
   fs.writeFileSync(compiledPath, `${JSON.stringify(input.compiled, null, 2)}\n`, "utf8");
   writeJsx(
     path.join(outputDir, "generate_project.jsx"),
-    `${header(input.compiled, "在空的 After Effects 项目里，用「文件 > 脚本 > 运行脚本文件」执行本脚本。")}\n${readAe("lib.jsx")}\n${readAe("project.jsx")}\n${readAe("layers.jsx")}\n${readAe("bootstrap.jsx")}\nVN.main();\n`,
+    `${header(input.compiled, "在 After Effects 里用「文件 > 脚本 > 运行脚本文件」执行。空项目会另存为新工程；已有工程会追加一个独立实例。")}\n${readAe("lib.jsx")}\n${readAe("project.jsx")}\n${readAe("layers.jsx")}\n${readAe("bootstrap.jsx")}\nVN.main();\n`,
   );
   writeJsx(
     path.join(outputDir, "refresh_text_timing.jsx"),
-    `${header(input.compiled, "选中文字层后运行。只刷新打字进度，不移动后续事件。")}\n${readAe("lib.jsx")}\n${readAe("timing.jsx")}\n${readAe("refresh.jsx")}\nVN.refresh();\n`,
+    `${header(input.compiled, "选中第二版文字层后运行。按当前文案重写打字关键帧；手工改过的关键帧会跳过。")}\n${readAe("lib.jsx")}\n${readAe("timing.jsx")}\n${readAe("refresh.jsx")}\nVN.refresh();\n`,
+  );
+  writeJsx(
+    path.join(outputDir, "convert_v1_text_animation.jsx"),
+    `${header(input.compiled, "打开第一版工程中的合成后运行。把生成器管理的动画表达式采样成关键帧，保留样式表达式。")}\n${readAe("lib.jsx")}\n${readAe("migrate-v1.jsx")}\nVN.migrate();\n`,
   );
 
   const report = {
@@ -54,11 +58,12 @@ export function exportBuild(input: {
     timeline: input.compiled.timeline,
     ae: {
       status: "pending",
-      note: "请在空项目中运行 generate_project.jsx。字体、表达式、排版边界和保存结果写在 report.ae.json。",
+      note: "运行 generate_project.jsx。空项目会另存为新工程；已有工程只追加实例，不自动保存。结果写在 report.ae.json。",
     },
     outputs: [
       "generate_project.jsx",
       "refresh_text_timing.jsx",
+      "convert_v1_text_animation.jsx",
       "compiled.json",
       "source/project.json",
       "source/theme.json",

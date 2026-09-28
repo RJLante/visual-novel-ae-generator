@@ -1,17 +1,17 @@
 var VN = VN || {};
 
-VN.fillComp = function (comp, spec, assets, comps, folders, report) {
+VN.fillComp = function (comp, spec, assets, comps, folders, report, ctx) {
   var i;
   for (i = 0; i < spec.layers.length; i++) {
-    VN.addLayer(comp, spec.layers[i], assets, comps, folders, report);
+    VN.addLayer(comp, spec.layers[i], assets, comps, folders, report, ctx);
   }
 };
 
-VN.addLayer = function (comp, spec, assets, comps, folders, report) {
+VN.addLayer = function (comp, spec, assets, comps, folders, report, ctx) {
   var layer;
   if (spec.kind === "text") layer = VN.addTextLayer(comp, spec, report);
   else if (spec.kind === "footage") layer = VN.addFootageLayer(comp, spec, assets);
-  else if (spec.kind === "solid") layer = VN.addSolidLayer(comp, spec, folders);
+  else if (spec.kind === "solid") layer = VN.addSolidLayer(comp, spec, folders, ctx);
   else if (spec.kind === "null") layer = VN.addNullLayer(comp, spec);
   else if (spec.kind === "precomp") layer = VN.addPrecompLayer(comp, spec, comps);
   else throw new Error("未知图层类型：" + spec.kind);
@@ -19,7 +19,8 @@ VN.addLayer = function (comp, spec, assets, comps, folders, report) {
   layer.name = spec.name;
   VN.applyTransform(layer, comp, spec);
   VN.applyEffects(layer, spec);
-  if (spec.kind === "text") VN.finishTextLayer(layer, comp, spec, report);
+  if (spec.kind === "text") VN.finishTextLayer(layer, comp, spec, report, ctx);
+  else if (spec.comment) VN.writeMeta(layer, VN.layerMeta(spec, ctx), spec.comment);
   return layer;
 };
 
@@ -89,17 +90,19 @@ VN.addFootageLayer = function (comp, spec, assets) {
   return layer;
 };
 
-VN.addSolidLayer = function (comp, spec, folders) {
+VN.addSolidLayer = function (comp, spec, folders, ctx) {
+  var solidName = VN.fitItemName(comp.name + "_" + spec.name, ctx.used);
   var layer = comp.layers.addSolid(
     [spec.color[0], spec.color[1], spec.color[2]],
-    comp.name + "_" + spec.name,
+    solidName,
     spec.solidWidth,
     spec.solidHeight,
     1,
     comp.duration
   );
   if (layer.source) {
-    layer.source.name = comp.name + "_" + spec.name;
+    layer.source.name = solidName;
+    ctx.footage.push(layer.source);
     if (folders.SOLIDS) layer.source.parentFolder = folders.SOLIDS;
   }
   return layer;
@@ -110,8 +113,8 @@ VN.addNullLayer = function (comp, spec) {
 };
 
 VN.addPrecompLayer = function (comp, spec, comps) {
-  var source = comps[spec.compName];
-  if (!source) throw new Error("找不到合成：" + spec.compName);
+  var source = comps[spec.compRef];
+  if (!source) throw new Error("找不到合成：" + spec.compRef);
   return comp.layers.add(source);
 };
 
@@ -132,6 +135,24 @@ VN.applyTransform = function (layer, comp, spec) {
   VN.applyPositionKeys(layer, comp, spec);
 };
 
+VN.layerMeta = function (spec, ctx) {
+  var animation = spec.textAnimation;
+  return {
+    v: 2,
+    projectId: ctx.projectId,
+    buildId: ctx.buildId,
+    instanceId: ctx.instanceId,
+    logicalId: spec.logicalId || "layer:" + spec.name,
+    eventId: spec.eventId,
+    generatorVersion: ctx.generatorVersion,
+    preset: animation ? animation.preset : undefined,
+    holdIn: spec.holdInFrames,
+    eventFrames: spec.eventFrames,
+    reveal: animation ? VN.compactKeys(animation.revealKeys) : undefined,
+    opacity: animation ? VN.compactKeys(animation.opacityKeys) : undefined
+  };
+};
+
 VN.correctBoxAnchor = function (layer, spec) {
   var transform = VN.requireProp(layer, "ADBE Transform Group");
   var anchor = VN.requireProp(transform, "ADBE Anchor Point");
@@ -150,6 +171,10 @@ VN.applyOpacityKeys = function (layer, comp, spec) {
   var i;
   for (i = 0; i < spec.opacityKeys.length; i++) {
     opacity.setValueAtTime(VN.frameTime(comp, spec.opacityKeys[i].frame), spec.opacityKeys[i].value);
+  }
+  for (i = 0; i < spec.opacityKeys.length; i++) {
+    var interp = VN.interpolationType(spec.opacityKeys[i].interpolation || "linear");
+    opacity.setInterpolationTypeAtKey(i + 1, interp, interp);
   }
 };
 
@@ -184,14 +209,18 @@ VN.applyEffects = function (layer, spec) {
   }
 };
 
-VN.finishTextLayer = function (layer, comp, spec, report) {
-  if (spec.reveal) VN.measureText(layer, comp, spec, report);
+VN.finishTextLayer = function (layer, comp, spec, report, ctx) {
+  if (spec.textAnimation) VN.measureText(layer, comp, spec, report);
   var opacity = VN.requireProp(VN.requireProp(layer, "ADBE Transform Group"), "ADBE Opacity");
-  if (spec.opacityExpression) opacity.expression = spec.opacityExpression;
+  if (spec.opacityExpression) opacity.expression = VN.bindExpression(spec.opacityExpression, ctx.names);
   if (spec.sourceTextExpression) {
-    VN.requireProp(VN.requireProp(layer, "ADBE Text Properties"), "ADBE Text Document").expression = spec.sourceTextExpression;
+    VN.requireProp(VN.requireProp(layer, "ADBE Text Properties"), "ADBE Text Document").expression = VN.bindExpression(
+      spec.sourceTextExpression,
+      ctx.names
+    );
   }
-  if (spec.reveal) VN.installReveal(layer, spec.reveal);
+  if (spec.textAnimation && spec.textAnimation.revealKeys) VN.installRevealKeys(layer, comp, spec.textAnimation.revealKeys);
+  VN.writeMeta(layer, VN.layerMeta(spec, ctx), spec.comment);
   VN.collectExpressionErrors(layer, comp, report);
 };
 
@@ -204,7 +233,7 @@ VN.setSelectorValue = function (selector, matchName, value) {
   if (prop !== null) prop.setValue(value);
 };
 
-VN.installReveal = function (layer, reveal) {
+VN.installRevealKeys = function (layer, comp, keys) {
   var animators = VN.requireProp(VN.requireProp(layer, "ADBE Text Properties"), "ADBE Text Animators");
   var anim = animators.addProperty("ADBE Text Animator");
   anim.name = "REVEAL";
@@ -217,10 +246,17 @@ VN.installReveal = function (layer, reveal) {
   VN.setSelectorValue(selector, "ADBE Text Selector Smoothness", 0);
   VN.setSelectorValue(selector, "ADBE Text Levels Max Ease", 0);
   VN.setSelectorValue(selector, "ADBE Text Levels Min Ease", 0);
-  VN.requireProp(selector, "ADBE Text Index Start").expression = reveal.start;
-  VN.requireProp(selector, "ADBE Text Index End").expression = reveal.end;
+  var start = VN.selectorProp(selector, "ADBE Text Index Start");
+  var end = VN.selectorProp(selector, "ADBE Text Index End");
+  if (start === null || end === null) throw new Error("找不到文字范围选择器的 Start 或 End");
+  if (end.expression) end.expression = "";
+  end.setValue(VN.REVEAL_END_INDEX);
   var amount = selector.property("ADBE Text Selector Max Amount");
-  if (amount !== null) amount.expression = reveal.amount;
+  if (amount !== null) {
+    if (amount.expression) amount.expression = "";
+    amount.setValue(100);
+  }
+  VN.applyScalarKeys(start, comp, keys);
 };
 
 VN.measureText = function (layer, comp, spec, report) {
@@ -271,6 +307,14 @@ VN.collectExpressionErrors = function (layer, comp, report) {
   for (i = 0; i < targets.length; i++) {
     var prop = targets[i];
     if (prop === null || !prop.expression) continue;
+    if (prop.expression.indexOf("{{comp:") !== -1) {
+      report.expressionErrors.push({
+        layer: comp.name + " / " + layer.name,
+        property: prop.matchName,
+        detail: "表达式引用没有绑定"
+      });
+      continue;
+    }
     try {
       prop.valueAtTime(0, false);
     } catch (err) {}

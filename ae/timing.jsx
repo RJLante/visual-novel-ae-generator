@@ -118,3 +118,41 @@ VN.lineCharacterFrames = function (chars, timing, fps, lineIntervalFrames) {
   }
   return { frames: frames, revealFrames: offset };
 };
+
+VN.revealKeyframes = function (appearFrames, holdInFrames) {
+  var keys = [];
+  var countAt = function (frame) {
+    var count = 0;
+    var i;
+    for (i = 0; i < appearFrames.length; i++) if (appearFrames[i] <= frame) count += 1;
+    return count;
+  };
+  var push = function (frame, value) {
+    var i;
+    for (i = 0; i < keys.length; i++) {
+      if (keys[i].frame === frame) {
+        keys[i].value = value;
+        return;
+      }
+    }
+    keys.push({ frame: frame, value: value, interpolation: "hold" });
+  };
+  if (!appearFrames.length) {
+    push(holdInFrames > 0 ? holdInFrames : 0, 0);
+    return keys;
+  }
+  if (holdInFrames > 0) push(0, countAt(0));
+  var seen = {};
+  var unique = [];
+  var n;
+  for (n = 0; n < appearFrames.length; n++) {
+    if (!seen[appearFrames[n]]) {
+      seen[appearFrames[n]] = true;
+      unique.push(appearFrames[n]);
+    }
+  }
+  unique.sort(function (a, b) { return a - b; });
+  for (n = 0; n < unique.length; n++) push(holdInFrames + unique[n], countAt(unique[n]));
+  keys.sort(function (a, b) { return a.frame - b.frame; });
+  return keys;
+};
