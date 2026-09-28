@@ -145,6 +145,8 @@ VN.layerMeta = function (spec, ctx) {
     logicalId: spec.logicalId || "layer:" + spec.name,
     eventId: spec.eventId,
     generatorVersion: ctx.generatorVersion,
+    displayName: ctx.displayName,
+    versionLabel: ctx.versionLabel,
     preset: animation ? animation.preset : undefined,
     holdIn: spec.holdInFrames,
     eventFrames: spec.eventFrames,

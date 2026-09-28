@@ -34,7 +34,9 @@ finish(
   built.ok,
   built.errors,
   built.warnings,
-  built.ok ? `${describe(built.durationFrames, built.durationSeconds, built.eventCount)}\n已输出：${built.outputDir}` : "",
+  built.ok
+    ? `${describe(built.durationFrames, built.durationSeconds, built.eventCount)}\n作品包：${path.join(built.outputDir || "", "vn-package.json")}`
+    : "",
 );
 
 function describe(frames?: number, seconds?: number, events?: number): string {
@@ -56,4 +58,5 @@ function printUsage(): void {
   console.log("用法:");
   console.log("  vn-ae validate <作品目录>");
   console.log("  vn-ae build <作品目录> --out <输出目录>");
+  console.log("输出 vn-package.json。请换新的 --out 目录发布新版本，不要覆盖已经导入 After Effects 的作品包。");
 }

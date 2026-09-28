@@ -7,8 +7,9 @@
     "vn-ae": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
-    "test": "tsx --test tests/timing.test.ts tests/compile.test.ts tests/pipeline.test.ts",
+    "build": "tsc && node scripts/build-panel.mjs",
+    "panel": "node scripts/build-panel.mjs",
+    "test": "tsx --test tests/timing.test.ts tests/compile.test.ts tests/pipeline.test.ts tests/package.test.ts",
     "vn-ae": "tsx src/cli.ts",
     "placeholders": "node scripts/write-placeholders.mjs"
   },

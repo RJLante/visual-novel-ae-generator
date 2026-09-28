@@ -15,31 +15,47 @@ test("build 输出 JSX、编排、配置快照和检查报告", () => {
   const built = buildProject(projectDir, outputDir);
   assert.equal(built.ok, true, built.errors.map((error) => error.message).join("\n"));
   for (const name of [
+    "vn-package.json",
     "generate_project.jsx",
     "refresh_text_timing.jsx",
     "convert_v1_text_animation.jsx",
-    "vn_panel.jsx",
     "compiled.json",
     "report.json",
   ]) {
     assert.equal(fs.existsSync(path.join(outputDir, name)), true, name);
   }
+  assert.equal(fs.existsSync(path.join(outputDir, "vn_panel.jsx")), false);
   const jsx = fs.readFileSync(path.join(outputDir, "generate_project.jsx"));
   assert.deepEqual([jsx[0], jsx[1], jsx[2]], [0xef, 0xbb, 0xbf]);
   const jsxText = jsx.toString("utf8");
   assert.match(jsxText, /VN\.main\(\)/);
+  assert.match(jsxText, /VN\.runImport\(/);
+  assert.match(jsxText, /saveProject: app\.project\.numItems === 0/);
   assert.match(jsxText, /After Effects 2021/);
   assert.match(jsxText, /ensureExpressionEngineCompatible/);
+  assert.equal(jsxText.includes('scriptFolder().fsName + "/compiled.json"'), false);
   assert.equal(jsxText.includes("ensureEmptyProject"), false);
   assert.equal(jsxText.includes("2022"), false);
   assert.match(fs.readFileSync(path.join(outputDir, "refresh_text_timing.jsx"), "utf8"), /VN\.refresh\(\)/);
   assert.match(fs.readFileSync(path.join(outputDir, "convert_v1_text_animation.jsx"), "utf8"), /VN\.migrate\(\)/);
-  assert.match(fs.readFileSync(path.join(outputDir, "vn_panel.jsx"), "utf8"), /VN\.showPanel\(\)/);
   const compiled = JSON.parse(fs.readFileSync(path.join(outputDir, "compiled.json"), "utf8")) as {
     schemaVersion: number;
+    buildId: string;
+    durationFrames: number;
     assets: { absolutePath: string; relativePath: string }[];
     timeline: unknown[];
   };
+  const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, "vn-package.json"), "utf8")) as {
+    packageVersion: number;
+    entry: string;
+    buildId: string;
+    summary: { sceneCount: number; textEventCount: number; durationFrames: number };
+  };
+  assert.equal(manifest.packageVersion, 1);
+  assert.equal(manifest.entry, "compiled.json");
+  assert.equal(manifest.buildId, compiled.buildId);
+  assert.equal(manifest.summary.durationFrames, compiled.durationFrames);
+  assert.equal(manifest.summary.textEventCount, 1);
   assert.equal(compiled.schemaVersion, 2);
   assert.equal(compiled.assets[0].relativePath, "assets/background.png");
   assert.match(compiled.assets[0].absolutePath, /assets\/background\.png$/);

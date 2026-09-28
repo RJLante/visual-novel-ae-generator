@@ -31,16 +31,20 @@ function run(projectDir: string, outputDir: string, write: boolean): RunResult {
     return { ok: false, errors: loaded.errors, warnings: loaded.warnings };
   }
   if (write) {
-    exportBuild({
-      projectDir,
-      outputDir,
-      projectFile: loaded.projectFile!,
-      themeFile: loaded.themeFile!,
-      scriptFile: loaded.scriptFile!,
-      compiled: loaded.compiled,
-      assets: loaded.assets!,
-      warnings: loaded.warnings,
-    });
+    try {
+      exportBuild({
+        projectDir,
+        outputDir,
+        projectFile: loaded.projectFile!,
+        themeFile: loaded.themeFile!,
+        scriptFile: loaded.scriptFile!,
+        compiled: loaded.compiled,
+        assets: loaded.assets!,
+        warnings: loaded.warnings,
+      });
+    } catch (error) {
+      return { ok: false, errors: [{ path: outputDir, message: messageOf(error) }], warnings: loaded.warnings };
+    }
   }
   return {
     ok: true,

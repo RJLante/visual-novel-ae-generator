@@ -37,8 +37,8 @@ VN.readJsonFile = function (file) {
 };
 
 VN.loadCompiled = function () {
-  var file = new File(VN.scriptFolder().fsName + "/compiled.json");
-  return VN.readJsonFile(file);
+  if (!VN.packageRoot) throw new Error("没有指定作品包。请在面板中选择 vn-package.json。");
+  return VN.readJsonFile(new File(VN.packageRoot.fsName + "/compiled.json"));
 };
 
 VN.writeJsonFile = function (file, value) {
