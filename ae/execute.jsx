@@ -710,11 +710,9 @@ VN.executeSpeed = function (lock, speed) {
       VN.restoreSpeed(snapshot);
       if (folder) folder.item.comment = snapshot.folderComment;
     } catch (rollback) {
-      try { app.endUndoGroup(); } catch (ignore) {}
-      return VN.finishOperation("speed", [VN.itemResult("failed", "rollback_failed", lock.instanceId, "速度调整失败，而且未能恢复。" + rollback.toString())]);
+      return VN.finishOperation("speed", [VN.itemResult("failed", "rollback_failed", lock.instanceId, VN.closeUndoGroup("速度调整失败，而且未能恢复。" + rollback.toString()))]);
     }
-    try { app.endUndoGroup(); } catch (ignoreEnd) {}
-    return VN.finishOperation("speed", [VN.itemResult("failed", "write_failed", lock.instanceId, "未调整速度：写入失败，片段已恢复。" + err.toString())]);
+    return VN.finishOperation("speed", [VN.itemResult("failed", "write_failed", lock.instanceId, VN.closeUndoGroup("未调整速度：写入失败，片段已恢复。" + err.toString()))]);
   }
   app.endUndoGroup();
   var message = "速度已调整为 " + speed + " 倍。";
@@ -867,11 +865,9 @@ VN.applyStylePatch = function (lock, layers, patch) {
         snapshots[i].source.setValue(current);
       }
     } catch (rollback) {
-      try { app.endUndoGroup(); } catch (ignore) {}
-      return VN.finishOperation("style", [VN.itemResult("failed", "rollback_failed", lock.instanceId, "样式恢复失败。" + rollback.toString())]);
+      return VN.finishOperation("style", [VN.itemResult("failed", "rollback_failed", lock.instanceId, VN.closeUndoGroup("样式恢复失败。" + rollback.toString()))]);
     }
-    try { app.endUndoGroup(); } catch (ignoreEnd) {}
-    return VN.finishOperation("style", [VN.itemResult("failed", "write_failed", lock.instanceId, "样式没有写入，已恢复。" + err.toString())]);
+    return VN.finishOperation("style", [VN.itemResult("failed", "write_failed", lock.instanceId, VN.closeUndoGroup("样式没有写入，已恢复。" + err.toString()))]);
   }
   app.endUndoGroup();
   return VN.finishOperation("style", [VN.itemResult("updated", null, lock.instanceId, "样式已更新。")]);
