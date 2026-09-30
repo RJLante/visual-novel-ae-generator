@@ -97,10 +97,6 @@ VN.instanceTiming = function (instanceId) {
     if (!meta || meta.instanceId !== instanceId || meta.logicalId !== "global:control" || !meta.timing) continue;
     return { timing: meta.timing, fps: meta.fps || item.frameRate };
   }
-  try {
-    var compiled = VN.loadCompiled();
-    if (compiled && compiled.timing) return { timing: compiled.timing, fps: compiled.fps };
-  } catch (ignore) {}
   return null;
 };
 

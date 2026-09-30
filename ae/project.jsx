@@ -45,7 +45,11 @@ VN.prepareInstance = function (ctx, compiled) {
   ctx.instanceId = folderName;
   ctx.projectId = compiled.id;
   ctx.buildId = compiled.buildId;
+  ctx.schemaVersion = compiled.schemaVersion || 2;
+  ctx.packageHash = compiled.packageHash || "";
   ctx.generatorVersion = compiled.generatorVersion;
+  if (!ctx.displayName) ctx.displayName = compiled.name || "";
+  if (!ctx.versionLabel) ctx.versionLabel = "";
   ctx.names = {};
   ctx.folders = [];
   ctx.footage = [];
@@ -71,28 +75,41 @@ VN.compNameFor = function (ctx, suffix) {
 };
 
 VN.resolveAssetFile = function (asset) {
-  if (asset.relativePath) {
-    var relative = new File(VN.scriptFolder().fsName + "/" + asset.relativePath);
-    if (relative.exists) return relative;
+  if (!VN.packageRoot) throw new Error("没有指定作品包目录，无法解析素材。");
+  if (!asset.relativePath || VN.unsafeRelative(asset.relativePath)) {
+    throw new Error("素材路径超出作品包：" + (asset.relativePath || asset.id || ""));
   }
-  if (asset.absolutePath) {
-    var absolute = new File(asset.absolutePath);
-    if (absolute.exists) return absolute;
-  }
-  throw new Error("素材不存在：" + (asset.relativePath || asset.absolutePath || asset.id));
+  var relative = new File(VN.packageRoot.fsName + "/" + asset.relativePath);
+  if (relative.exists) return relative;
+  throw new Error("找不到 " + VN.fileBaseName(asset.relativePath));
 };
 
 VN.buildProject = function (compiled, report, ctx) {
   var root = app.project.items.addFolder(ctx.folderName);
   ctx.folders.push(root);
-  VN.writeMeta(root, {
-    v: 2,
+  var instanceMeta = {
+    v: ctx.schemaVersion >= 3 ? 3 : 2,
     projectId: ctx.projectId,
     buildId: ctx.buildId,
     instanceId: ctx.instanceId,
     logicalId: "instance",
-    generatorVersion: ctx.generatorVersion
-  }, "");
+    generatorVersion: ctx.generatorVersion,
+    displayName: ctx.displayName,
+    versionLabel: ctx.versionLabel
+  };
+  if (ctx.schemaVersion >= 3) {
+    instanceMeta.schemaVersion = 3;
+    instanceMeta.identity = {
+      instanceId: ctx.instanceId,
+      packageId: compiled.id,
+      packageVersion: compiled.buildId,
+      packageHash: ctx.packageHash,
+      schemaVersion: 3
+    };
+    instanceMeta.baseline = compiled.baseline;
+    instanceMeta.current = { speed: 1, defaultEffect: "typewriter", revision: 1 };
+  }
+  VN.writeMeta(root, instanceMeta, "");
 
   var folders = { ROOT: root };
   var i;
@@ -103,6 +120,7 @@ VN.buildProject = function (compiled, report, ctx) {
     folders[compiled.folders[i]] = child;
   }
 
+  VN.notifyPhase("assets");
   var assets = {};
   for (i = 0; i < compiled.assets.length; i++) {
     var asset = compiled.assets[i];
@@ -117,6 +135,7 @@ VN.buildProject = function (compiled, report, ctx) {
     assets[asset.id] = footage;
   }
 
+  VN.notifyPhase("comps");
   var comps = {};
   for (i = 0; i < compiled.comps.length; i++) {
     var spec = compiled.comps[i];
@@ -125,13 +144,20 @@ VN.buildProject = function (compiled, report, ctx) {
     var comp = VN.addComp(folders[spec.folder] || folders.ROOT, aeName, spec.width, spec.height, spec.durationFrames, compiled.fps);
     ctx.comps.push(comp);
     var compMeta = {
-      v: 2,
+      v: ctx.schemaVersion >= 3 ? 3 : 2,
       projectId: ctx.projectId,
       buildId: ctx.buildId,
       instanceId: ctx.instanceId,
       logicalId: spec.logicalId,
-      generatorVersion: ctx.generatorVersion
+      generatorVersion: ctx.generatorVersion,
+      displayName: ctx.displayName,
+      versionLabel: ctx.versionLabel
     };
+    if (ctx.schemaVersion >= 3) {
+      compMeta.schemaVersion = 3;
+      compMeta.baseline = { durationFrames: spec.durationFrames };
+      compMeta.current = { revision: 1 };
+    }
     if (spec.logicalId === "global:control") {
       compMeta.fps = compiled.fps;
       compMeta.timing = compiled.timing;
@@ -140,6 +166,7 @@ VN.buildProject = function (compiled, report, ctx) {
     comps[spec.logicalId] = comp;
   }
 
+  VN.notifyPhase("layers");
   for (i = 0; i < compiled.comps.length; i++) {
     VN.fillComp(comps[compiled.comps[i].logicalId], compiled.comps[i], assets, comps, folders, report, ctx);
   }
@@ -242,12 +269,6 @@ VN.offerInsert = function (active, master, compiled, ctx, report) {
           "」的播放头？\n选择「否」则只在项目面板里保留新合成。"
   );
   if (!place) return;
-  if (Math.abs(host.frameRate - compiled.fps) > 0.01) {
-    report.warnings.push("宿主合成帧率是 " + host.frameRate + "，生成片段是 " + compiled.fps + "。未改宿主帧率，嵌套合成保持自己的帧率。");
-  }
-  if (host.width !== compiled.width || host.height !== compiled.height) {
-    report.warnings.push("宿主合成分辨率与生成片段不同。已按 100% 放入，没有拉伸。");
-  }
   var start = host.time;
   var end = start + master.duration;
   if (end > host.duration + 0.0005) {
@@ -256,6 +277,16 @@ VN.offerInsert = function (active, master, compiled, ctx, report) {
     );
     if (extend) host.duration = end;
     else report.warnings.push("未延长宿主合成。超出结尾的画面不会显示。");
+  }
+  VN.placeInstanceLayer(host, master, ctx, report, start, overlay, compiled);
+};
+
+VN.placeInstanceLayer = function (host, master, ctx, report, start, overlay, compiled) {
+  if (compiled && Math.abs(host.frameRate - compiled.fps) > 0.01) {
+    report.warnings.push("宿主合成帧率是 " + host.frameRate + "，生成片段是 " + compiled.fps + "。未改宿主帧率，嵌套合成保持自己的帧率。");
+  }
+  if (compiled && (host.width !== compiled.width || host.height !== compiled.height)) {
+    report.warnings.push("宿主合成分辨率与生成片段不同。已按 100% 放入，没有拉伸。");
   }
   var layer = host.layers.add(master);
   layer.name = ctx.folderName;
@@ -267,10 +298,19 @@ VN.offerInsert = function (active, master, compiled, ctx, report) {
   layer.outPoint = outPoint;
   ctx.insertedLayers.push(layer);
   report.inserted = overlay ? host.name + " / " + layer.name + "（USER_OVERLAY 下面）" : host.name + " @ " + start.toFixed(3) + "s";
+  return layer;
 };
 
 VN.saveProject = function (compiled) {
-  var out = new File(VN.scriptFolder().fsName + "/" + compiled.saveFileName);
+  if (!VN.packageRoot) throw new Error("没有指定作品包目录，无法保存工程。");
+  var out = new File(VN.packageRoot.fsName + "/" + compiled.saveFileName);
   app.project.save(out);
   return out;
+};
+
+VN.notifyPhase = function (phase) {
+  if (!VN.onImportPhase) return;
+  try {
+    VN.onImportPhase(phase);
+  } catch (ignorePhase) {}
 };

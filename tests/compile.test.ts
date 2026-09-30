@@ -51,8 +51,9 @@ test("选项光标从初始项移到预选结果，文字表达式不写死文�
   assert.ok((cursor.positionKeys?.[0].y ?? 0) > (cursor.positionKeys?.[2].y ?? 0));
   const text = layer(comp(compiled, "EVENT_d001"), "TEXT_d001");
   assert.match(text.sourceTextExpression ?? "", /setText\(base\)/);
-  assert.match(text.sourceTextExpression ?? "", /字号倍率/);
-  assert.match(text.sourceTextExpression ?? "", /\{\{comp:global:control\}\}/);
+  assert.match(text.sourceTextExpression ?? "", /style:dialogue/);
+  assert.equal(text.sourceTextExpression?.includes("字号倍率"), false);
+  assert.equal(text.sourceTextExpression?.includes("统一字体"), false);
   assert.equal(text.sourceTextExpression?.includes('comp("CONTROL")'), false);
   assert.equal(text.sourceTextExpression?.includes("连接已建立"), false);
   assert.equal(text.reveal, undefined);
@@ -96,8 +97,11 @@ test("工程结构保留全局控制，并且不把控制合成放进主合成",
   );
   const control = comp(compiled, "CONTROL");
   const names = control.layers[0].effects?.map((effect) => effect.name);
-  assert.deepEqual(names, ["字号倍率", "全局文字不透明度", "统一字体", "统一颜色"]);
-  assert.equal(compiled.schemaVersion, 2);
+  assert.deepEqual(names, ["全局文字不透明度"]);
+  assert.equal(compiled.schemaVersion, 3);
+  assert.equal(compiled.baseline.masterDurationFrames, compiled.durationFrames);
+  assert.equal(compiled.baseline.events[0].eventId, "d001");
+  assert.ok(compiled.baseline.events[0].pauses.length > 0);
   assert.match(compiled.buildId, /^[0-9a-f]{8}$/);
   assert.equal(comp(compiled, "CONTROL").logicalId, "global:control");
   assert.equal(comp(compiled, "EVENT_d001").layers.map((item) => item.name).join(","), "DIALOGUE_FRAME,TEXT_d001");

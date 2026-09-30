@@ -20,7 +20,8 @@ VN.addLayer = function (comp, spec, assets, comps, folders, report, ctx) {
   VN.applyTransform(layer, comp, spec);
   VN.applyEffects(layer, spec);
   if (spec.kind === "text") VN.finishTextLayer(layer, comp, spec, report, ctx);
-  else if (spec.comment) VN.writeMeta(layer, VN.layerMeta(spec, ctx), spec.comment);
+  else VN.writeMeta(layer, VN.layerMeta(spec, ctx), spec.comment || "");
+  if (ctx.schemaVersion >= 3 && spec.kind !== "text") VN.sealLayerRecord(layer, comp);
   return layer;
 };
 
@@ -137,20 +138,45 @@ VN.applyTransform = function (layer, comp, spec) {
 
 VN.layerMeta = function (spec, ctx) {
   var animation = spec.textAnimation;
-  return {
-    v: 2,
+  var meta = {
+    v: ctx.schemaVersion >= 3 ? 3 : 2,
     projectId: ctx.projectId,
     buildId: ctx.buildId,
     instanceId: ctx.instanceId,
     logicalId: spec.logicalId || "layer:" + spec.name,
     eventId: spec.eventId,
     generatorVersion: ctx.generatorVersion,
+    displayName: ctx.displayName,
+    versionLabel: ctx.versionLabel,
     preset: animation ? animation.preset : undefined,
     holdIn: spec.holdInFrames,
     eventFrames: spec.eventFrames,
     reveal: animation ? VN.compactKeys(animation.revealKeys) : undefined,
-    opacity: animation ? VN.compactKeys(animation.opacityKeys) : undefined
+    opacity: animation ? VN.compactKeys(animation.opacityKeys) : undefined,
+    dependency: "managed"
   };
+  if (ctx.schemaVersion >= 3) {
+    meta.schemaVersion = 3;
+    if (animation && animation.preset === "typewriter") meta.effect = "typewriter";
+    meta.baseline = {
+      inFrame: spec.inFrame || 0,
+      outFrame: spec.outFrame === undefined ? null : spec.outFrame,
+      startFrame: spec.inFrame || 0,
+      opacity: VN.compactKeys(spec.opacityKeys),
+      reveal: animation ? VN.compactKeys(animation.revealKeys) : undefined,
+      position: VN.compactPosition(spec.positionKeys)
+    };
+    meta.current = { effect: meta.effect || "", speed: 1, revision: 1 };
+  }
+  return meta;
+};
+
+VN.compactPosition = function (keys) {
+  if (!keys || !keys.length) return undefined;
+  var out = [];
+  var i;
+  for (i = 0; i < keys.length; i++) out.push([keys[i].frame, keys[i].x, keys[i].y, keys[i].interp || "linear"]);
+  return out;
 };
 
 VN.correctBoxAnchor = function (layer, spec) {
@@ -221,6 +247,7 @@ VN.finishTextLayer = function (layer, comp, spec, report, ctx) {
   }
   if (spec.textAnimation && spec.textAnimation.revealKeys) VN.installRevealKeys(layer, comp, spec.textAnimation.revealKeys);
   VN.writeMeta(layer, VN.layerMeta(spec, ctx), spec.comment);
+  if (ctx.schemaVersion >= 3) VN.sealLayerRecord(layer, comp);
   VN.collectExpressionErrors(layer, comp, report);
 };
 

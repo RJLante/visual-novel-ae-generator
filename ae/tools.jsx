@@ -16,7 +16,7 @@ VN.scopeTargets = function (scope) {
     return { targets: sceneLayers };
   }
   var instanceId = VN.instanceIdFromContext(active);
-  if (!instanceId) return { error: "无法判断当前实例。请先选中该实例里的文字层。", targets: [] };
+  if (!instanceId) return { error: "请选择一个生成的片段。", targets: [] };
   var found = [];
   var n;
   for (n = 1; n <= app.project.numItems; n++) {
@@ -31,9 +31,16 @@ VN.scopeTargets = function (scope) {
 };
 
 VN.instanceIdFromContext = function (comp) {
-  if (comp.selectedLayers.length) {
-    var selected = VN.readMeta(comp.selectedLayers[0].comment);
-    if (selected && selected.instanceId) return selected.instanceId;
+  var found = null;
+  if (comp.selectedLayers && comp.selectedLayers.length) {
+    var i;
+    for (i = 0; i < comp.selectedLayers.length; i++) {
+      var meta = VN.readMeta(comp.selectedLayers[i].comment);
+      if (!meta || !meta.instanceId) continue;
+      if (found && found !== meta.instanceId) return null;
+      found = meta.instanceId;
+    }
+    if (found) return found;
   }
   var own = VN.readMeta(comp.comment);
   if (own && own.instanceId) return own.instanceId;
@@ -54,12 +61,9 @@ VN.managedTextLayers = function (comp, instanceId) {
   return layers;
 };
 
-VN.runOnTargets = function (scope, title, fn) {
+VN.applyToTargets = function (scope, title, fn) {
   var found = VN.scopeTargets(scope);
-  if (found.error) {
-    alert(found.error);
-    return;
-  }
+  if (found.error) return { ok: false, message: found.error, notes: [] };
   var notes = [];
   app.beginUndoGroup(title);
   var i;
@@ -72,7 +76,50 @@ VN.runOnTargets = function (scope, title, fn) {
     }
   }
   app.endUndoGroup();
-  alert(notes.join("\n"));
+  return { ok: true, message: "", notes: notes };
+};
+
+VN.runOnTargets = function (scope, title, fn) {
+  var result = VN.applyToTargets(scope, title, fn);
+  if (!result.ok) {
+    alert(result.message);
+    return;
+  }
+  alert(result.notes.join("\n"));
+};
+
+VN.rebuildSelectedText = function () {
+  var active = app.project.activeItem;
+  if (!(active instanceof CompItem)) return { ok: false, message: "请先选择文字层。", details: "" };
+  var targets = [];
+  var i;
+  for (i = 0; i < active.selectedLayers.length; i++) {
+    var layer = active.selectedLayers[i];
+    if (layer.property("ADBE Text Properties") === null) continue;
+    var meta = VN.readMeta(layer.comment);
+    if (!meta || meta.v !== 2) continue;
+    if (meta.preset !== "typewriter" && meta.preset !== "lines") continue;
+    targets.push(layer);
+  }
+  if (!targets.length) return { ok: false, message: "没有可重建的文字层。", details: "" };
+  var notes = [];
+  app.beginUndoGroup("VN 按新文案重建动画");
+  for (i = 0; i < targets.length; i++) {
+    try {
+      notes.push(VN.refreshLayer(targets[i], active));
+    } catch (err) {
+      notes.push(targets[i].name + "：" + err.toString());
+    }
+  }
+  for (i = 0; i < targets.length; i++) {
+    try {
+      notes.push(VN.checkLayer(targets[i], active));
+    } catch (err) {
+      notes.push(targets[i].name + " 检查：" + err.toString());
+    }
+  }
+  app.endUndoGroup();
+  return { ok: true, message: "已重建 " + targets.length + " 个文字层的动画", details: notes.join("\n") };
 };
 
 VN.refreshTargets = function (scope) {
@@ -300,12 +347,12 @@ VN.removeRevealAnimator = function (layer) {
 VN.locateControl = function () {
   var active = app.project.activeItem;
   if (!(active instanceof CompItem)) {
-    alert("请先打开该实例里的合成。");
+    alert("请选择一个生成的片段。");
     return;
   }
   var instanceId = VN.instanceIdFromContext(active);
   if (!instanceId) {
-    alert("请先选中该实例里的文字层。");
+    alert("请选择一个生成的片段。");
     return;
   }
   var i;
@@ -320,13 +367,3 @@ VN.locateControl = function () {
   alert("找不到这个实例的控制合成。");
 };
 
-VN.importPackage = function () {
-  var picked = File.openDialog("选择生成包中的 compiled.json", "JSON:*.json");
-  if (!picked) return;
-  VN.packageFolder = picked.parent;
-  try {
-    VN.main();
-  } finally {
-    VN.packageFolder = null;
-  }
-};

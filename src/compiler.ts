@@ -17,6 +17,7 @@ import {
   type CompiledLayer,
   type CompiledProject,
   type ImageAsset,
+  type InstanceBaseline,
   type Issue,
   type Keyframe,
   type NormalizedChoiceEvent,
@@ -28,6 +29,7 @@ import {
   type TimelineEntry,
 } from "./types";
 import { CONTROL_GUIDE, sourceTextExpression, textOpacityExpression } from "./ae-expressions";
+import { pausesFromPunctuation } from "./animation-plan";
 import {
   fadeOpacityKeyframes,
   planCharacters,
@@ -102,6 +104,7 @@ export function compile(
   if (errors.length > 0) return { errors, warnings };
 
   const durationFrames = scenes.reduce((sum, scene) => sum + scene.durationFrames, 0);
+  const identity = contentIdentity(project);
   comps.push({
     logicalId: LOGICAL.overlay,
     name: COMP.overlay,
@@ -117,10 +120,12 @@ export function compile(
     errors,
     warnings,
     compiled: {
-      schemaVersion: 2,
+      schemaVersion: 3,
+      packageHash: identity,
+      baseline: baselineFor(scenes, project, durationFrames),
       generatorVersion: GENERATOR_VERSION,
       id: project.id,
-      buildId: buildIdFor(project),
+      buildId: identity.slice(0, 8),
       name: project.name,
       width: project.width,
       height: project.height,
@@ -613,12 +618,7 @@ function controlComp(project: NormalizedProject): CompiledComp {
         name: COMP.ctrlLayer,
         kind: "null",
         position: [project.width / 2, project.height / 2],
-        effects: [
-          { type: "slider", name: EFFECT_NAMES.fontSizeMultiplier, value: 1 },
-          { type: "slider", name: EFFECT_NAMES.globalTextOpacity, value: 100 },
-          { type: "checkbox", name: EFFECT_NAMES.unifyFont, value: false },
-          { type: "checkbox", name: EFFECT_NAMES.unifyColor, value: false },
-        ],
+        effects: [{ type: "slider", name: EFFECT_NAMES.globalTextOpacity, value: 100 }],
       },
       {
         name: "说明",
@@ -674,8 +674,68 @@ function styleLogicalId(name: string): string {
   return LOGICAL.styleDialogue;
 }
 
-function buildIdFor(project: NormalizedProject): string {
-  return createHash("sha256").update(JSON.stringify({ id: project.id, timing: project.timing, scenes: project.scenes })).digest("hex").slice(0, 8);
+function contentIdentity(project: NormalizedProject): string {
+  return createHash("sha256").update(JSON.stringify({ id: project.id, timing: project.timing, scenes: project.scenes })).digest("hex");
+}
+
+function baselineFor(scenes: TimedScene[], project: NormalizedProject, durationFrames: number): InstanceBaseline {
+  const events: InstanceBaseline["events"] = [];
+  const dependencies: InstanceBaseline["dependencies"] = [];
+  for (const scene of scenes) {
+    const sceneStart = scene.logicalStart - scene.leadFrames;
+    const sceneDuration = scene.leadFrames + scene.durationFrames;
+    dependencies.push({
+      id: scene.id,
+      kind: "scene-boundary",
+      sync: "managed",
+      startFrame: sceneStart,
+      durationFrames: sceneDuration,
+    });
+    dependencies.push({
+      id: `${scene.id}:background`,
+      kind: "background",
+      sync: "managed",
+      startFrame: sceneStart,
+      durationFrames: sceneDuration,
+    });
+    for (const event of scene.events) {
+      const source = event.source;
+      const text = source.type === "dialogue" || source.type === "narration" ? source.text : "";
+      events.push({
+        eventId: source.id,
+        sceneId: scene.id,
+        startFrame: scene.logicalStart + event.logicalStart,
+        durationFrames: event.durationFrames,
+        animationStartFrame: event.holdInFrames,
+        characterIntervalFrames: Math.max(1, Math.round(project.fps / project.timing.charactersPerSecond)),
+        charactersPerSecond: project.timing.charactersPerSecond,
+        characterFadeFrames: secondsToFrames(project.timing.fadeSeconds, project.fps),
+        pauses: text ? pausesFromPunctuation(text, project.timing, project.fps) : [],
+      });
+      dependencies.push({
+        id: source.id,
+        kind: source.type === "transition" ? "transition" : "scene-boundary",
+        sync: "managed",
+        startFrame: scene.logicalStart + event.logicalStart - event.holdInFrames,
+        durationFrames: event.holdInFrames + event.durationFrames + event.holdOutFrames,
+      });
+    }
+  }
+  dependencies.push({
+    id: "overlay",
+    kind: "overlay",
+    sync: "managed",
+    startFrame: 0,
+    durationFrames,
+  });
+  return {
+    fps: project.fps,
+    masterDurationFrames: durationFrames,
+    commaPauseFrames: secondsToFrames(project.timing.commaPauseSeconds, project.fps),
+    sentencePauseFrames: secondsToFrames(project.timing.sentencePauseSeconds, project.fps),
+    events,
+    dependencies,
+  };
 }
 
 function eventCompFrames(event: TimedEvent): number {

@@ -1,5 +1,16 @@
 var VN = VN || {};
 
+// The business result is already decided. A failed close can leave the undo
+// group open, so the report names that residue instead of ending silently.
+VN.closeUndoGroup = function (message) {
+  try {
+    app.endUndoGroup();
+  } catch (undoClose) {
+    return message + " 撤销分组未能关闭：" + undoClose.toString();
+  }
+  return message;
+};
+
 VN.requireProp = function (group, matchName) {
   var prop = group.property(matchName);
   if (prop === null) {
@@ -37,8 +48,8 @@ VN.readJsonFile = function (file) {
 };
 
 VN.loadCompiled = function () {
-  var file = new File(VN.scriptFolder().fsName + "/compiled.json");
-  return VN.readJsonFile(file);
+  if (!VN.packageRoot) throw new Error("没有指定作品包。请在面板中选择 vn-package.json。");
+  return VN.readJsonFile(new File(VN.packageRoot.fsName + "/compiled.json"));
 };
 
 VN.writeJsonFile = function (file, value) {

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { assertCanWritePackage, createPackageManifest, inspectManifestFile, PACKAGE_ENTRY_NAME } from "./package-manifest";
 import type { CompiledProject, ImageAsset, Issue } from "./types";
 
 const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
@@ -19,6 +20,7 @@ export function exportBuild(input: {
   if (outputDir === projectDir) {
     throw new Error("输出目录不能和作品目录相同");
   }
+  assertCanWritePackage(outputDir, input.compiled.buildId);
   fs.mkdirSync(path.join(outputDir, "source"), { recursive: true });
   fs.copyFileSync(input.projectFile, path.join(outputDir, "source", "project.json"));
   fs.copyFileSync(input.themeFile, path.join(outputDir, "source", "theme.json"));
@@ -33,7 +35,7 @@ export function exportBuild(input: {
   fs.writeFileSync(compiledPath, `${JSON.stringify(input.compiled, null, 2)}\n`, "utf8");
   writeJsx(
     path.join(outputDir, "generate_project.jsx"),
-    `${header(input.compiled, "在 After Effects 里用「文件 > 脚本 > 运行脚本文件」执行。空项目会另存为新工程；已有工程会追加一个独立实例。")}\n${readAe("lib.jsx")}\n${readAe("project.jsx")}\n${readAe("layers.jsx")}\n${readAe("bootstrap.jsx")}\nVN.main();\n`,
+    `${header(input.compiled, "兼容入口：在 After Effects 里用「文件 > 脚本 > 运行脚本文件」执行。空项目会另存为新工程；已有工程会追加一个独立实例。日常导入请安装一次「文字冒险」面板，再选择 vn-package.json。")}\n${readAe("lib.jsx")}\n${readAe("project.jsx")}\n${readAe("layers.jsx")}\n${readAe("package-reader.jsx")}\n${readAe("import-service.jsx")}\n${readAe("bootstrap.jsx")}\nVN.main();\n`,
   );
   writeJsx(
     path.join(outputDir, "refresh_text_timing.jsx"),
@@ -43,11 +45,6 @@ export function exportBuild(input: {
     path.join(outputDir, "convert_v1_text_animation.jsx"),
     `${header(input.compiled, "打开第一版工程中的合成后运行。把生成器管理的动画表达式采样成关键帧，保留样式表达式。")}\n${readAe("lib.jsx")}\n${readAe("migrate-v1.jsx")}\nVN.migrate();\n`,
   );
-  writeJsx(
-    path.join(outputDir, "vn_panel.jsx"),
-    `${header(input.compiled, "在 After Effects 里运行后打开操作面板。默认只处理选中的文字；手工改过的关键帧不会被刷新覆盖。")}\n${readAe("lib.jsx")}\n${readAe("project.jsx")}\n${readAe("layers.jsx")}\n${readAe("timing.jsx")}\n${readAe("refresh.jsx")}\n${readAe("tools.jsx")}\n${readAe("bootstrap.jsx")}\n${readAe("panel.jsx")}\nVN.showPanel();\n`,
-  );
-
   const report = {
     ok: true,
     stage: "node",
@@ -62,21 +59,30 @@ export function exportBuild(input: {
     timeline: input.compiled.timeline,
     ae: {
       status: "pending",
-      note: "运行 generate_project.jsx。空项目会另存为新工程；已有工程只追加实例，不自动保存。结果写在 report.ae.json。",
+      note: "用「文字冒险」面板选择 vn-package.json 导入。面板不会自动保存工程。兼容脚本 generate_project.jsx 在空项目里仍会另存为新工程。",
     },
     outputs: [
-      "generate_project.jsx",
-      "refresh_text_timing.jsx",
-      "convert_v1_text_animation.jsx",
-      "vn_panel.jsx",
+      PACKAGE_ENTRY_NAME,
       "compiled.json",
       "source/project.json",
       "source/theme.json",
       "source/script.json",
       "report.json",
+      "generate_project.jsx",
+      "refresh_text_timing.jsx",
+      "convert_v1_text_animation.jsx",
     ],
   };
   fs.writeFileSync(path.join(outputDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+
+  const manifest = createPackageManifest(input.compiled, new Date());
+  const manifestPath = path.join(outputDir, PACKAGE_ENTRY_NAME);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const inspection = inspectManifestFile(manifestPath);
+  if (!inspection.ok) {
+    fs.rmSync(manifestPath, { force: true });
+    throw new Error(inspection.message);
+  }
 }
 
 function header(compiled: CompiledProject, usage: string): string {
